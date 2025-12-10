@@ -4,15 +4,15 @@ SCUT操作系统课程大作业：论文审稿系统
 ```
 .
 ├── filesystem  
-│   ├── bin # 编译后的二进制文件  
+│   ├── bin          # 编译后的二进制文件  
 │   │   └── mkfs  
-│   ├── disk # 磁盘文件  
+│   ├── disk         # 磁盘文件  
 │   │   └── disk.img  
-│   ├── include # 头文件  
+│   ├── include      # 头文件  
 │   │   └── disk.h  
-│   ├── scripts # 工具代码  
+│   ├── scripts      # 工具代码  
 │   │   └── mkfs.cpp  
-│   └── src # 源代码  
+│   └── src          # 源代码  
 │       ├── disk.cpp  
 │       └── makefile  
 └── README.md  
