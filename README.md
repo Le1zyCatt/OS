@@ -1,6 +1,7 @@
 # OS
 SCUT操作系统课程大作业：论文审稿系统  
 ## 1. 目录结构说明
+```
 .
 ├── filesystem  
 │   ├── bin # 编译后的二进制文件  
@@ -15,6 +16,7 @@ SCUT操作系统课程大作业：论文审稿系统
 │       ├── disk.cpp  
 │       └── makefile  
 └── README.md  
+```
   
 ## 2. 设计文档
 ![os1](https://github.com/user-attachments/assets/7a5e74fc-87c2-4fd6-9b0c-90ed27e5af60)
