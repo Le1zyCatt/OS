@@ -1,9 +1,10 @@
-// disk.cpp
+// 在 disk.cpp 中添加以下实现
 #include "../include/disk.h"
 #include <unistd.h>
 #include <fcntl.h>
 #include <cstring>
 #include <iostream>
+#include <cassert>
 
 int disk_open(const char* path) {
     int fd = open(path, O_RDWR | O_CREAT, 0666);
@@ -28,4 +29,74 @@ void write_block(int fd, int block_id, const void* buf) {
     off_t offset = (off_t)block_id * BLOCK_SIZE;
     lseek(fd, offset, SEEK_SET);
     write(fd, buf, BLOCK_SIZE);
+}
+
+// 分配一个 inode
+int alloc_inode(int fd) {
+    char buf[BLOCK_SIZE];
+    read_block(fd, INODE_BITMAP_BLOCK, buf);
+    
+    // 查找第一个为0的位（空闲inode）
+    for (int i = 0; i < BLOCK_SIZE * 8; i++) {
+        int byte_index = i / 8;
+        int bit_index = i % 8;
+        
+        if (!(buf[byte_index] & (1 << bit_index))) {
+            // 找到空闲 inode，标记为已使用
+            buf[byte_index] |= (1 << bit_index);
+            write_block(fd, INODE_BITMAP_BLOCK, buf);
+            return i;
+        }
+    }
+    
+    // 没有可用的 inode
+    return -1;
+}
+
+// 释放一个 inode
+void free_inode(int fd, int inode_id) {
+    char buf[BLOCK_SIZE];
+    read_block(fd, INODE_BITMAP_BLOCK, buf);
+    
+    int byte_index = inode_id / 8;
+    int bit_index = inode_id % 8;
+    
+    // 标记为未使用
+    buf[byte_index] &= ~(1 << bit_index);
+    write_block(fd, INODE_BITMAP_BLOCK, buf);
+}
+
+// 分配一个数据块
+int alloc_block(int fd) {
+    char buf[BLOCK_SIZE];
+    read_block(fd, BLOCK_BITMAP_BLOCK, buf);
+    
+    // 查找第一个为0的位（空闲数据块）
+    for (int i = 0; i < BLOCK_COUNT; i++) {
+        int byte_index = i / 8;
+        int bit_index = i % 8;
+        
+        if (!(buf[byte_index] & (1 << bit_index))) {
+            // 找到空闲数据块，标记为已使用
+            buf[byte_index] |= (1 << bit_index);
+            write_block(fd, BLOCK_BITMAP_BLOCK, buf);
+            return i;
+        }
+    }
+    
+    // 没有可用的数据块
+    return -1;
+}
+
+// 释放一个数据块
+void free_block(int fd, int block_id) {
+    char buf[BLOCK_SIZE];
+    read_block(fd, BLOCK_BITMAP_BLOCK, buf);
+    
+    int byte_index = block_id / 8;
+    int bit_index = block_id % 8;
+    
+    // 标记为未使用
+    buf[byte_index] &= ~(1 << bit_index);
+    write_block(fd, BLOCK_BITMAP_BLOCK, buf);
 }

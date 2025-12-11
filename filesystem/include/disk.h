@@ -24,6 +24,12 @@ struct Superblock {
     int free_block_count;
 };
 
+// Bitmap 操作函数声明
+int alloc_inode(int fd);
+void free_inode(int fd, int inode_id);
+int alloc_block(int fd);
+void free_block(int fd, int block_id);
+
 int disk_open(const char* path);
 void disk_close(int fd);
 

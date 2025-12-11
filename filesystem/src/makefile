@@ -1,17 +1,25 @@
-# src/Makefile
 CXX = g++
-CXXFLAGS = -Wall -std=c++11
-INCLUDES = -I../include
-TARGET = ../bin/mkfs
-SOURCES = ../scripts/mkfs.cpp disk.cpp
+CXXFLAGS = -std=c++17 -Wall -I../include
 
-all: $(TARGET)
+BIN_DIR = ../bin
+DISK_DIR = ../disk
 
-$(TARGET): $(SOURCES)
-	@mkdir -p ../bin
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $^ -o $@
+TARGET_MKFS = $(BIN_DIR)/mkfs
+
+SRC = disk.cpp ../scripts/mkfs.cpp
+OBJ = $(SRC:.cpp=.o)
+
+all: $(TARGET_MKFS)
+
+$(TARGET_MKFS): $(OBJ)
+	mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+../scripts/%.o: ../scripts/%.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f ../bin/mkfs
+	rm -f *.o ../scripts/*.o
+	rm -f $(TARGET_MKFS)
 
 .PHONY: all clean
