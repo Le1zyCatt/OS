@@ -29,4 +29,8 @@ int read_inode(int fd, int inode_id, Inode* inode);
 int inode_alloc_block(int fd, Inode* inode);
 void inode_free_blocks(int fd, Inode* inode);
 
+// 新增文件数据操作函数声明
+int inode_write_data(int fd, Inode* inode, int inode_id, const char* data, int offset, int size);
+int inode_read_data(int fd, const Inode* inode, char* buffer, int offset, int size);
+
 #endif

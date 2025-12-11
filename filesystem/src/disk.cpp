@@ -31,6 +31,43 @@ void write_block(int fd, int block_id, const void* buf) {
     write(fd, buf, BLOCK_SIZE);
 }
 
+// 读取数据块的一部分内容
+int read_data_block(int fd, int block_id, void* buf, int offset, int size) {
+    // 参数检查
+    if (offset < 0 || size <= 0 || offset + size > BLOCK_SIZE) {
+        return -1;
+    }
+    
+    // 读取整个块
+    char block_buf[BLOCK_SIZE];
+    read_block(fd, block_id, block_buf);
+    
+    // 拷贝需要的数据
+    memcpy(buf, block_buf + offset, size);
+    
+    return size;
+}
+
+// 写入数据块的一部分内容
+int write_data_block(int fd, int block_id, const void* data, int offset, int size) {
+    // 参数检查
+    if (offset < 0 || size <= 0 || offset + size > BLOCK_SIZE) {
+        return -1;
+    }
+    
+    // 读取整个块
+    char block_buf[BLOCK_SIZE];
+    read_block(fd, block_id, block_buf);
+    
+    // 更新数据
+    memcpy(block_buf + offset, data, size);
+    
+    // 写回整个块
+    write_block(fd, block_id, block_buf);
+    
+    return size;
+}
+
 // superblock相关逻辑
 // superblock读取
 void read_superblock(int fd, Superblock* sb) {

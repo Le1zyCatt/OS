@@ -36,4 +36,12 @@ void disk_close(int fd);
 void read_block(int fd, int block_id, void* buf);
 void write_block(int fd, int block_id, const void* buf);
 
+// 新增数据块操作函数声明
+int read_data_block(int fd, int block_id, void* buf, int offset, int size);
+int write_data_block(int fd, int block_id, const void* data, int offset, int size);
+
+// 新增superblock操作函数声明
+void read_superblock(int fd, Superblock* sb);
+void write_superblock(int fd, const Superblock* sb);
+
 #endif
