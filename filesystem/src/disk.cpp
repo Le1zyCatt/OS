@@ -31,6 +31,22 @@ void write_block(int fd, int block_id, const void* buf) {
     write(fd, buf, BLOCK_SIZE);
 }
 
+// superblock相关逻辑
+// superblock读取
+void read_superblock(int fd, Superblock* sb) {
+    char buf[BLOCK_SIZE];
+    read_block(fd, SUPERBLOCK_BLOCK, buf);
+    memcpy(sb, buf, sizeof(Superblock));
+}
+
+// superblock写回
+void write_superblock(int fd, const Superblock* sb) {
+    char buf[BLOCK_SIZE];
+    memset(buf, 0, BLOCK_SIZE);
+    memcpy(buf, sb, sizeof(Superblock));
+    write_block(fd, SUPERBLOCK_BLOCK, buf);
+}
+
 // 分配一个 inode
 int alloc_inode(int fd) {
     char buf[BLOCK_SIZE];
@@ -45,6 +61,13 @@ int alloc_inode(int fd) {
             // 找到空闲 inode，标记为已使用
             buf[byte_index] |= (1 << bit_index);
             write_block(fd, INODE_BITMAP_BLOCK, buf);
+            
+            // 更新superblock中的空闲inode计数
+            Superblock sb;
+            read_superblock(fd, &sb);
+            sb.free_inode_count--;
+            write_superblock(fd, &sb);
+            
             return i;
         }
     }
@@ -64,6 +87,12 @@ void free_inode(int fd, int inode_id) {
     // 标记为未使用
     buf[byte_index] &= ~(1 << bit_index);
     write_block(fd, INODE_BITMAP_BLOCK, buf);
+    
+    // 更新superblock中的空闲inode计数
+    Superblock sb;
+    read_superblock(fd, &sb);
+    sb.free_inode_count++;
+    write_superblock(fd, &sb);
 }
 
 // 分配一个数据块
@@ -80,6 +109,13 @@ int alloc_block(int fd) {
             // 找到空闲数据块，标记为已使用
             buf[byte_index] |= (1 << bit_index);
             write_block(fd, BLOCK_BITMAP_BLOCK, buf);
+            
+            // 更新superblock中的空闲块计数
+            Superblock sb;
+            read_superblock(fd, &sb);
+            sb.free_block_count--;
+            write_superblock(fd, &sb);
+            
             return i;
         }
     }
@@ -99,4 +135,10 @@ void free_block(int fd, int block_id) {
     // 标记为未使用
     buf[byte_index] &= ~(1 << bit_index);
     write_block(fd, BLOCK_BITMAP_BLOCK, buf);
+    
+    // 更新superblock中的空闲块计数
+    Superblock sb;
+    read_superblock(fd, &sb);
+    sb.free_block_count++;
+    write_superblock(fd, &sb);
 }

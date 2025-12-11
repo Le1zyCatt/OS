@@ -6,7 +6,7 @@ DISK_DIR = ../disk
 
 TARGET_MKFS = $(BIN_DIR)/mkfs
 
-SRC = disk.cpp ../scripts/mkfs.cpp
+SRC = disk.cpp inode.cpp ../scripts/mkfs.cpp
 OBJ = $(SRC:.cpp=.o)
 
 all: $(TARGET_MKFS)
@@ -14,6 +14,9 @@ all: $(TARGET_MKFS)
 $(TARGET_MKFS): $(OBJ)
 	mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -o $@ $^
+
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 ../scripts/%.o: ../scripts/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
