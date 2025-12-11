@@ -3,19 +3,28 @@ SCUT操作系统课程大作业：论文审稿系统
 ## 1. 目录结构说明
 ```
 .
-├── filesystem  
-│   ├── bin          # 编译后的二进制文件  
-│   │   └── mkfs  
-│   ├── disk         # 磁盘文件  
-│   │   └── disk.img  
-│   ├── include      # 头文件  
-│   │   └── disk.h  
-│   ├── scripts      # 工具代码  
-│   │   └── mkfs.cpp  
-│   └── src          # 源代码  
-│       ├── disk.cpp  
-│       └── makefile  
-└── README.md  
+├── filesystem                  # 文件系统项目根目录
+│   ├── bin                     # 编译输出目录，存放可执行文件
+│   │   ├── mkfs                # 文件系统格式化工具可执行文件
+│   │   └── test_filesystem     # 文件系统测试程序可执行文件
+│   ├── disk                    # 磁盘镜像目录
+│   │   └── disk.img            # 10MB的磁盘镜像文件
+│   ├── include                 # 头文件目录
+│   │   ├── disk.h              # 磁盘操作相关定义和函数声明
+│   │   └── inode.h             # inode相关定义和函数声明
+│   ├── scripts                 # 脚本和工具程序源码目录
+│   │   ├── mkfs.cpp            # 文件系统格式化工具源代码
+│   │   └── mkfs.o              # mkfs.cpp编译生成的目标文件
+│   ├── src                     # 核心源代码目录
+│   │   ├── disk.cpp            # 磁盘操作函数实现
+│   │   ├── disk.o              # disk.cpp编译生成的目标文件
+│   │   ├── inode.cpp           # inode操作函数实现
+│   │   ├── inode.o             # inode.cpp编译生成的目标文件
+│   │   └── makefile            # 项目构建规则文件
+│   └── test                    # 测试代码目录
+│       ├── test_filesystem.cpp # 文件系统完整功能测试程序源代码
+│       └── test_filesystem.o   # 测试程序编译生成的目标文件
+└── README.md                   # 项目说明文档
 ```
   
 ## 2. 设计文档
