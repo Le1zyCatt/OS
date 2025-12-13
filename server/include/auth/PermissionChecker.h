@@ -1,0 +1,37 @@
+#ifndef PERMISSION_CHECKER_H
+#define PERMISSION_CHECKER_H
+
+// 引入 Authenticator.h 是为了使用其中定义的 UserRole 枚举
+#include "Authenticator.h" 
+
+// 定义操作所需的权限类型
+enum class Permission {
+    READ,    // 读权限
+    WRITE,   // 写权限
+    EXECUTE  // 执行权限
+};
+
+// 权限检查器类
+class PermissionChecker {
+public:
+    // 检查一个用户角色是否拥有所需权限的核心函数
+    // 这是一个简化实现。真实世界的应用会更复杂，可能会从配置文件或数据库中加载角色与权限的对应关系。
+    bool hasPermission(UserRole role, Permission requiredPermission) {
+        switch (role) {
+            // 管理员拥有所有权限
+            case UserRole::ADMIN:
+                return true; 
+            // 开发者拥有读和写的权限
+            case UserRole::DEVELOPER:
+                return requiredPermission == Permission::READ || requiredPermission == Permission::WRITE;
+            // 访客只拥有读权限
+            case UserRole::GUEST:
+                return requiredPermission == Permission::READ;
+            // 其他未知角色没有任何权限
+            default:
+                return false;
+        }
+    }
+};
+
+#endif // PERMISSION_CHECKER_H

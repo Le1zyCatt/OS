@@ -1,0 +1,39 @@
+#include "../../include/business/BackupFlow.h"
+#include "../../include/protocol/FSProtocol.h"
+#include "../../include/auth/Authenticator.h"
+#include "../../include/auth/PermissionChecker.h"
+#include <string>
+#include <ctime> // 用于生成时间戳
+
+// 构造函数实现
+BackupFlow::BackupFlow(Authenticator* auth, PermissionChecker* perm, FSProtocol* fs)
+    : authenticator_(auth), permissionChecker_(perm), fsProtocol_(fs) {}
+
+
+// createBackup 方法实现
+bool BackupFlow::createBackup(const std::string& sessionId, 
+                             const std::string& path, 
+                             std::string& errorMsg) {
+    // 1. 身份确认：验证会话
+    std::string username;
+    if (!authenticator_->validateSession(sessionId, username, errorMsg)) {
+        errorMsg = "Invalid session ID: " + errorMsg;
+        return false;
+    }
+
+    UserRole userRole = authenticator_->getUserRole(sessionId);
+    if (!permissionChecker_->hasPermission(userRole, Permission::WRITE)) {
+        errorMsg = "Permission denied: User does not have WRITE permission.";
+        return false;
+    }
+
+    // 3. 【调用 FileSystem API】创建快照
+    // 生成一个基于时间的唯一快照名称
+    std::string snapshotName = "backup_" + std::to_string(time(nullptr));
+    if (!fsProtocol_->createSnapshot(path, snapshotName, errorMsg)) {
+        errorMsg = "Failed to create snapshot: " + errorMsg;
+        return false;
+    }
+    
+    return true;
+}
