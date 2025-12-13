@@ -23,7 +23,7 @@ std::string ReviewFlow::submitForReview(const std::string& sessionId,
     // 2. 权限确认：检查用户是否有权对该路径发起此操作的审核
     //    例如，提交 "DELETE" 审核前，用户至少得有读取权限才能看到文件
     UserRole userRole = authenticator_->getUserRole(sessionId);
-    if (!permissionChecker_->hasPermission(userRole, Permission::READ)) {
+    if (!permissionChecker_->hasPermission(userRole, Permission::REVIEW_SUBMIT)) {
         errorMsg = "Permission denied to access path for review: " + errorMsg;
         return "";
     }

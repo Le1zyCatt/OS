@@ -5,6 +5,8 @@ HOST = 'localhost'  # 服务器地址
 PORT = 8080         # 服务器端口
 BUFFER_SIZE = 4096  # 增大缓冲区避免截断长响应
 
+SESSION_TOKEN = None
+
 def send_command(command):
     """发送单条指令并获取响应（自动重连）"""
     max_retries = 3
@@ -53,10 +55,35 @@ if __name__ == "__main__":
             if not cmd:
                 print("⚠️  指令不能为空！")
                 continue
+
+            # 自动注入 session token（除 LOGIN 外）
+            upper = cmd.strip().split(" ", 1)[0].upper() if cmd.strip() else ""
+            if upper not in {"LOGIN"}:
+                if SESSION_TOKEN is None:
+                    print("⚠️  未登录：请先执行 LOGIN <user> <pass>")
+                    continue
+
+                # 如果用户已经手动带了 token，就不重复注入
+                parts = cmd.split()
+                if len(parts) >= 2 and parts[1] == SESSION_TOKEN:
+                    pass
+                else:
+                    cmd = f"{upper} {SESSION_TOKEN} " + cmd[len(parts[0]):].lstrip()
                 
             # 发送指令并显示结果
             print("\n⏳ 等待服务器响应...")
             response = send_command(cmd)
+
+            # 解析 LOGIN 返回的 token
+            if upper == "LOGIN" and response.startswith("OK:"):
+                # 期望格式：OK: <token> ROLE=...
+                try:
+                    token_part = response.split("OK:", 1)[1].strip().split()[0]
+                    if token_part:
+                        SESSION_TOKEN = token_part
+                        print(f"[i] 当前会话 token: {SESSION_TOKEN}")
+                except Exception:
+                    pass
             
             # 彩色化输出响应
             if response.startswith("❌"):
