@@ -1,5 +1,7 @@
 # OS
 SCUT操作系统课程大作业：论文审稿系统  
+## ⚠️注意
+client与server不在一台机器，使用ssh通信；server与filesystem在一台机器，使用websocket通信，因此目录尽量独立。  
 ## 1. 目录结构说明
 ```
 .
