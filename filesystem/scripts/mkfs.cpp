@@ -1,5 +1,6 @@
-// mkfs.cpp
+// 修改 scripts/mkfs.cpp
 #include "../include/disk.h"
+#include "../include/inode.h"
 #include <unistd.h>
 #include <iostream>
 #include <cstring>
@@ -44,8 +45,20 @@ int main() {
     for (int i = 0; i < INODE_TABLE_BLOCK_COUNT; i++) {
         write_block(fd, INODE_TABLE_START + i, buf);
     }
+    
+    // ---- 创建根目录 ----
+    int root_inode_id = alloc_inode(fd);
+    if (root_inode_id != 0) {
+        cout << "错误：根目录inode ID应该是0，实际是" << root_inode_id << endl;
+        disk_close(fd);
+        return 1;
+    }
+    
+    Inode root_inode;
+    init_inode(&root_inode, INODE_TYPE_DIR);
+    write_inode(fd, root_inode_id, &root_inode);
 
-    cout << "disk.img 格式化完成！" << endl;
+    cout << "disk.img 格式化完成！根目录创建成功。" << endl;
 
     disk_close(fd);
     return 0;
