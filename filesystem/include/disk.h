@@ -55,7 +55,7 @@ struct BlockBitmapEntry {
 int create_snapshot(int fd, const char* name);
 int restore_snapshot(int fd, int snapshot_id);
 int delete_snapshot(int fd, int snapshot_id);
-int list_snapshots(int fd);
+int list_snapshots(int fd, Snapshot* snapshots, int max_count);
 
 // Bitmap 操作函数声明
 int alloc_inode(int fd);

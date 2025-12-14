@@ -63,10 +63,30 @@ int main(int argc, char* argv[]) {
             cout << "快照删除失败" << endl;
         }
     }
-    else if (strcmp(command, "list") == 0) {
-        cout << "列出快照功能尚未完全实现" << endl;
-        cout << "请使用测试程序查看快照功能" << endl;
+    // 替换 scripts/snapshot_tool.cpp 中 list 命令的处理部分
+else if (strcmp(command, "list") == 0) {
+    Snapshot snapshots[MAX_SNAPSHOTS];
+    int count = list_snapshots(fd, snapshots, MAX_SNAPSHOTS);
+    
+    if (count < 0) {
+        cout << "获取快照列表失败" << endl;
+        disk_close(fd);
+        return 1;
     }
+    
+    if (count == 0) {
+        cout << "没有找到快照" << endl;
+    } else {
+        cout << "快照列表:" << endl;
+        cout << "ID\t名称\t\t时间戳\t\t活动状态" << endl;
+        cout << "----------------------------------------" << endl;
+        
+        for (int i = 0; i < count; i++) {
+            cout << snapshots[i].id << "\t" << snapshots[i].name << "\t\t" 
+                 << snapshots[i].timestamp << "\t\t" << (snapshots[i].active ? "是" : "否") << endl;
+        }
+    }
+}
     else if (strcmp(command, "restore") == 0) {
         if (argc < 3) {
             cout << "错误: restore命令需要指定快照ID" << endl;

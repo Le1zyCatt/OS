@@ -5,6 +5,7 @@
 #include <cstring>
 #include <iostream>
 #include <cassert>
+#include <ctime>
 
 int disk_open(const char* path) {
     int fd = open(path, O_RDWR | O_CREAT, 0666);
@@ -133,6 +134,7 @@ void free_inode(int fd, int inode_id) {
 }
 
 // 修改alloc_block函数
+// 修改alloc_block函数
 int alloc_block(int fd) {
     char buf[BLOCK_SIZE];
     read_block(fd, BLOCK_BITMAP_BLOCK, buf);
@@ -148,6 +150,7 @@ int alloc_block(int fd) {
             
             // 初始化引用计数为1
             BlockBitmapEntry* entries = (BlockBitmapEntry*)buf;
+            entries[i].allocated = 1;  // 明确设置allocated位
             entries[i].ref_count = 1;
             
             write_block(fd, BLOCK_BITMAP_BLOCK, buf);
@@ -166,6 +169,7 @@ int alloc_block(int fd) {
     return -1;
 }
 
+// 修改free_block函数
 // 修改free_block函数
 void free_block(int fd, int block_id) {
     char buf[BLOCK_SIZE];
@@ -186,6 +190,7 @@ void free_block(int fd, int block_id) {
     
     // 标记为未使用
     buf[byte_index] &= ~(1 << bit_index);
+    entries[block_id].allocated = 0;  // 明确清除allocated位
     entries[block_id].ref_count = 0;
     
     write_block(fd, BLOCK_BITMAP_BLOCK, buf);
@@ -202,6 +207,7 @@ void free_block(int fd, int block_id) {
 // 修改这一段代码:
 
 // 创建快照
+// 修改 src/disk.cpp 中 create_snapshot 函数的相关部分
 int create_snapshot(int fd, const char* name) {
     // 查找空闲的快照槽位
     // 使用固定大小数组替代可变长度数组
@@ -209,7 +215,6 @@ int create_snapshot(int fd, const char* name) {
     
     // 读取快照表
     int snapshots_per_block = BLOCK_SIZE / sizeof(Snapshot);
-    int snapshot_count = 0;
     int free_slot = -1;
     
     // 逐个读取快照表块并查找空闲槽位
@@ -221,8 +226,8 @@ int create_snapshot(int fd, const char* name) {
             int idx = i * snapshots_per_block + j;
             if (!block_snapshots[j].active && free_slot == -1) {
                 free_slot = idx;
+                break; // 找到空闲槽位就退出内层循环
             }
-            snapshot_count++;
         }
         
         // 如果找到了空闲槽位，就不需要继续查找
@@ -257,10 +262,32 @@ int create_snapshot(int fd, const char* name) {
     return free_slot; // 返回快照ID
 }
 
-// 列出所有快照 (这个函数最好移到测试程序或工具程序中)
-int list_snapshots(int fd) {
-    // 这个函数更适合放在测试程序中，而不是文件系统核心代码中
-    return 0;
+// 替换 src/disk.cpp 中的 list_snapshots 函数实现
+int list_snapshots(int fd, Snapshot* snapshots, int max_count) {
+    if (!snapshots || max_count <= 0) {
+        return -1;
+    }
+    
+    char buf[BLOCK_SIZE];
+    int snapshots_per_block = BLOCK_SIZE / sizeof(Snapshot);
+    int count = 0;
+    
+    for (int i = 0; i < SNAPSHOT_TABLE_BLOCKS && count < max_count; i++) {
+        read_block(fd, SNAPSHOT_TABLE_START + i, buf);
+        Snapshot* block_snapshots = (Snapshot*)buf;
+        
+        for (int j = 0; j < snapshots_per_block && 
+             (i * snapshots_per_block + j) < MAX_SNAPSHOTS && 
+             count < max_count; j++) {
+            
+            if (block_snapshots[j].active) {
+                snapshots[count] = block_snapshots[j];
+                count++;
+            }
+        }
+    }
+    
+    return count; // 返回找到的快照数量
 }
 
 // 删除快照
@@ -330,6 +357,7 @@ int decrement_block_ref_count(int fd, int block_id) {
 }
 
 // 获取块引用计数
+// 获取块引用计数
 int get_block_ref_count(int fd, int block_id) {
     if (block_id < 0 || block_id >= BLOCK_COUNT) {
         return -1;
@@ -343,9 +371,10 @@ int get_block_ref_count(int fd, int block_id) {
         return entries[block_id].ref_count;
     }
     
-    return -1;
+    return -1; // 块未分配
 }
 
+// COW复制块
 // COW复制块
 int copy_on_write_block(int fd, int block_id) {
     if (block_id < 0 || block_id >= BLOCK_COUNT) {
@@ -371,12 +400,11 @@ int copy_on_write_block(int fd, int block_id) {
     write_block(fd, new_block_id, buf);
     
     // 更新引用计数
-    decrement_block_ref_count(fd, block_id);  // 减少旧块引用
-    increment_block_ref_count(fd, new_block_id);  // 增加新块引用
+    decrement_block_ref_count(fd, block_id);  // 减少旧块引用（从2减到1）
+    // 不增加新块引用计数，因为它专属于当前使用者
     
     return new_block_id;
 }
-
 // 添加到src/disk.cpp末尾
 
 // 恢复快照
