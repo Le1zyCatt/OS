@@ -142,32 +142,6 @@ void inode_free_blocks(int fd, Inode* inode) {
     inode->size = 0;
 }
 
-// 根据逻辑块号获取物理块号
-// int get_block_id(const Inode* inode, int logical_block_num) {
-//     if (logical_block_num < 0) {
-//         return -1;
-//     }
-    
-//     // 直接块
-//     if (logical_block_num < DIRECT_BLOCK_COUNT) {
-//         return inode->direct_blocks[logical_block_num];
-//     }
-    
-//     // 间接块
-//     if (inode->indirect_block != -1) {
-//         int indirect_index = logical_block_num - DIRECT_BLOCK_COUNT;
-//         if (indirect_index < POINTERS_PER_BLOCK) {
-//             int pointers[POINTERS_PER_BLOCK];
-//             // 这里我们需要磁盘文件描述符来读取间接块
-//             // 由于此函数没有fd参数，我们只能返回-1
-//             // 实际使用时应在inode_read_data/inode_write_data中处理
-//             return -1;
-//         }
-//     }
-    
-//     return -1; // 无法找到对应的物理块
-// }
-
 // 向inode写入数据
 int inode_write_data(int fd, Inode* inode, int inode_id, const char* data, int offset, int size) {
     if (size <= 0) return 0;

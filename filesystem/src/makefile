@@ -8,7 +8,7 @@ TEST_DIR = ../test
 TARGET_MKFS = $(BIN_DIR)/mkfs
 TARGET_TEST = $(BIN_DIR)/test_filesystem
 
-SRC = disk.cpp inode.cpp
+SRC = disk.cpp inode.cpp directory.cpp path.cpp  # 确保包含了 path.cpp
 OBJ = $(SRC:.cpp=.o)
 
 all: $(TARGET_MKFS) $(TARGET_TEST)
