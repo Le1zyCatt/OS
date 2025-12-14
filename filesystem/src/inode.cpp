@@ -142,7 +142,7 @@ void inode_free_blocks(int fd, Inode* inode) {
     inode->size = 0;
 }
 
-// 向inode写入数据
+// 修改inode_write_data函数以支持COW
 int inode_write_data(int fd, Inode* inode, int inode_id, const char* data, int offset, int size) {
     if (size <= 0) return 0;
     
@@ -178,6 +178,23 @@ int inode_write_data(int fd, Inode* inode, int inode_id, const char* data, int o
             int pointers[POINTERS_PER_BLOCK];
             read_block(fd, inode->indirect_block, pointers);
             physical_block_id = pointers[indirect_index];
+        }
+        
+        // COW检查 - 如果块被多个inode引用，则复制块
+        int new_block_id = copy_on_write_block(fd, physical_block_id);
+        if (new_block_id != physical_block_id) {
+            // 更新inode中的块指针
+            if (logical_block_num < DIRECT_BLOCK_COUNT) {
+                inode->direct_blocks[logical_block_num] = new_block_id;
+            } else {
+                // 更新间接块中的指针
+                int indirect_index = logical_block_num - DIRECT_BLOCK_COUNT;
+                int pointers[POINTERS_PER_BLOCK];
+                read_block(fd, inode->indirect_block, pointers);
+                pointers[indirect_index] = new_block_id;
+                write_block(fd, inode->indirect_block, pointers);
+            }
+            physical_block_id = new_block_id;
         }
         
         // 写入数据到块中

@@ -6,10 +6,14 @@
 #include <cstring>
 using namespace std;
 
+// ...前面的代码...
+
+// 修改 scripts/mkfs.cpp 中的main函数:
+
 int main() {
     int fd = disk_open("../disk/disk.img");
 
-    // 扩展文件到 DISK_SIZE
+    // 扩展文件到新的DISK_SIZE
     lseek(fd, DISK_SIZE - 1, SEEK_SET);
     write(fd, "\0", 1);
 
@@ -34,9 +38,11 @@ int main() {
     // ---- block bitmap ----
     memset(buf, 0, BLOCK_SIZE);
 
-    // 前面的 block 已经被占用，需要标记为 1
+    // 标记已被使用的块为已占用，并设置引用计数
+    BlockBitmapEntry* entries = (BlockBitmapEntry*)buf;
     for (int i = 0; i < DATA_BLOCK_START; i++) {
-        buf[i / 8] |= (1 << (i % 8));
+        buf[i / 8] |= (1 << (i % 8));  // 标记为已分配
+        entries[i].ref_count = 1;       // 设置引用计数为1
     }
     write_block(fd, BLOCK_BITMAP_BLOCK, buf);
 
@@ -46,6 +52,12 @@ int main() {
         write_block(fd, INODE_TABLE_START + i, buf);
     }
     
+    // ---- snapshot table (4 blocks) ----
+    memset(buf, 0, BLOCK_SIZE);
+    for (int i = 0; i < SNAPSHOT_TABLE_BLOCKS; i++) {
+        write_block(fd, SNAPSHOT_TABLE_START + i, buf);
+    }
+
     // ---- 创建根目录 ----
     int root_inode_id = alloc_inode(fd);
     if (root_inode_id != 0) {
