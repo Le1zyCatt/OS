@@ -13,6 +13,7 @@ BackupFlow::BackupFlow(Authenticator* auth, PermissionChecker* perm, FSProtocol*
 // createBackup 方法实现
 bool BackupFlow::createBackup(const std::string& sessionId, 
                              const std::string& path, 
+                             const std::string& snapshotName,
                              std::string& errorMsg) {
     // 1. 身份确认：验证会话
     std::string username;
@@ -22,15 +23,14 @@ bool BackupFlow::createBackup(const std::string& sessionId,
     }
 
     UserRole userRole = authenticator_->getUserRole(sessionId);
-    if (!permissionChecker_->hasPermission(userRole, Permission::WRITE)) {
-        errorMsg = "Permission denied: User does not have WRITE permission.";
+    if (!permissionChecker_->hasPermission(userRole, Permission::BACKUP_CREATE)) {
+        errorMsg = "Permission denied: User does not have BACKUP_CREATE permission.";
         return false;
     }
 
     // 3. 【调用 FileSystem API】创建快照
-    // 生成一个基于时间的唯一快照名称
-    std::string snapshotName = "backup_" + std::to_string(time(nullptr));
-    if (!fsProtocol_->createSnapshot(path, snapshotName, errorMsg)) {
+    const std::string actualName = snapshotName.empty() ? ("backup_" + std::to_string(time(nullptr))) : snapshotName;
+    if (!fsProtocol_->createSnapshot(path, actualName, errorMsg)) {
         errorMsg = "Failed to create snapshot: " + errorMsg;
         return false;
     }

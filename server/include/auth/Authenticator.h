@@ -1,11 +1,13 @@
 #pragma once
 #include <string>
-#include <optional>
+#include <vector>
 
 // 定义用户角色
 enum class UserRole {
     ADMIN,
-    DEVELOPER,
+    EDITOR,
+    REVIEWER,
+    AUTHOR,
     GUEST,
     UNKNOWN
 };
@@ -28,4 +30,14 @@ public:
 
     // 获取用户角色
     virtual UserRole getUserRole(const std::string& sessionToken) = 0;
+
+    // --- 管理员：用户管理 ---
+    virtual bool addUser(const std::string& username,
+                         const std::string& password,
+                         UserRole role,
+                         std::string& errorMsg) = 0;
+
+    virtual bool deleteUser(const std::string& username, std::string& errorMsg) = 0;
+
+    virtual std::vector<std::pair<std::string, UserRole>> listUsers(std::string& errorMsg) = 0;
 };

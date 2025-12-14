@@ -1,0 +1,10 @@
+^C:\USERS\LEO\OS\SERVER\BUILD\CMAKEFILES\CEC73D13BA4D23624AFE30EFC994226B\GENERATE.STAMP.RULE
+setlocal
+D:\cmake-3.29.2-windows-x86_64\bin\cmake.exe -SC:/Users/leo/OS/server -BC:/Users/leo/OS/server/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/leo/OS/server/build/AcademicPaperServer.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

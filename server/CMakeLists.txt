@@ -13,20 +13,28 @@ set(SERVER_SOURCES main.cpp ${CPP_FILES})
 # 定义服务器可执行文件
 add_executable(server ${SERVER_SOURCES})
 
-# 定义测试客户端可执行文件，并修正其路径
-add_executable(test_client test/test_client.cpp)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_client.cpp")
+    # 定义测试客户端可执行文件（如果存在）
+    add_executable(test_client test/test_client.cpp)
+endif()
 
 # 为服务器和客户端设置 include 目录
 # ${CMAKE_CURRENT_SOURCE_DIR} 指向 d:/work/os/server，可以确保 include 目录被正确找到
 target_include_directories(server PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(test_client PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+if(TARGET test_client)
+    target_include_directories(test_client PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
 
 # 为 Windows 平台链接 Winsock 库
 if(WIN32)
     target_link_libraries(server ws2_32)
-    target_link_libraries(test_client ws2_32)
+    if(TARGET test_client)
+        target_link_libraries(test_client ws2_32)
+    endif()
 endif()
 
 # 打印出可执行文件的生成位置，方便您查找
 message(STATUS "Server executable: $<TARGET_FILE:server>")
-message(STATUS "Client executable: $<TARGET_FILE:test_client>")
+if(TARGET test_client)
+    message(STATUS "Client executable: $<TARGET_FILE:test_client>")
+endif()

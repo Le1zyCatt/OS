@@ -17,6 +17,7 @@ public:
     // 成功返回 true, 失败返回 false，并通过 errorMsg 返回错误信息。
     bool createBackup(const std::string& sessionId, 
                       const std::string& path, 
+                      const std::string& snapshotName,
                       std::string& errorMsg);
 
 private:

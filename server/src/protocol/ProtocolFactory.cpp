@@ -4,6 +4,7 @@
 #include "../../include/auth/Authenticator.h"
 #include "../../include/auth/PermissionChecker.h"
 #include "../../include/business/BackupFlow.h"
+#include "../../include/business/PaperService.h"
 #include "../../include/business/ReviewFlow.h"
 #include <memory>
 #include <string>
@@ -22,6 +23,7 @@ public:
     PermissionChecker* getPermissionChecker() { return permissionChecker.get(); }
     FSProtocol* getFSProtocol() { return fsProtocol.get(); }
     BackupFlow* getBackupFlow() { return backupFlow.get(); }
+    PaperService* getPaperService() { return paperService.get(); }
     ReviewFlow* getReviewFlow() { return reviewFlow.get(); }
 
     // 获取单例实例的静态方法
@@ -40,6 +42,7 @@ private:
 
         // 2. 创建业务流程，并注入它们所依赖的服务
         backupFlow = std::make_unique<BackupFlow>(authenticator.get(), permissionChecker.get(), fsProtocol.get());
+        paperService = std::make_unique<PaperService>(authenticator.get(), permissionChecker.get(), fsProtocol.get());
         reviewFlow = std::make_unique<ReviewFlow>(authenticator.get(), permissionChecker.get(), fsProtocol.get());
         std::cout << "Application services initialized." << std::endl;
     }
@@ -49,6 +52,7 @@ private:
     std::unique_ptr<Authenticator> authenticator;
     std::unique_ptr<PermissionChecker> permissionChecker;
     std::unique_ptr<BackupFlow> backupFlow;
+    std::unique_ptr<PaperService> paperService;
     std::unique_ptr<ReviewFlow> reviewFlow;
 };
 
@@ -73,7 +77,9 @@ void ProtocolFactory::handleRequest(SOCKET clientSocket) {
     CLIProtocol cliProtocol(
         services.getFSProtocol(),
         services.getAuthenticator(),
+        services.getPermissionChecker(),
         services.getBackupFlow(),
+        services.getPaperService(),
         services.getReviewFlow()
     );
 
@@ -83,6 +89,6 @@ void ProtocolFactory::handleRequest(SOCKET clientSocket) {
 
     // 5. 将响应发回客户端
     if (!response.empty()) {
-        send(clientSocket, response.c_str(), response.length(), 0);
+        send(clientSocket, response.c_str(), static_cast<int>(response.length()), 0);
     }
 }
