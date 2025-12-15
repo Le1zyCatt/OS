@@ -1,3 +1,0 @@
-C:/Users/leo/OS/server/build/CMakeFiles/server.dir
-C:/Users/leo/OS/server/build/CMakeFiles/ALL_BUILD.dir
-C:/Users/leo/OS/server/build/CMakeFiles/ZERO_CHECK.dir
