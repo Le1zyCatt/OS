@@ -192,7 +192,10 @@ public:
 
     bool restoreSnapshot(const std::string& snapshotName, std::string& errorMsg) override {
         // 恢复会大规模改变内容：直接清空缓存
-        m_cache.clear();
+        {
+            std::scoped_lock lock(m_cacheMutex);
+            m_cache.clear();
+        }
         return m_inner->restoreSnapshot(snapshotName, errorMsg);
     }
 
@@ -201,27 +204,44 @@ public:
     }
 
     bool readFile(const std::string& path, std::string& content, std::string& errorMsg) override {
-        if (auto v = m_cache.tryGet(path)) {
-            content = *v;
-            return true;
+        const std::string key = normalizePath(path);
+
+        {
+            std::scoped_lock lock(m_cacheMutex);
+            if (auto v = m_cache.tryGet(key)) {
+                content = *v;
+                return true;
+            }
         }
 
-        if (!m_inner->readFile(path, content, errorMsg)) {
+        if (!m_inner->readFile(key, content, errorMsg)) {
             return false;
         }
-        m_cache.put(path, content);
+
+        {
+            std::scoped_lock lock(m_cacheMutex);
+            m_cache.put(key, content);
+        }
         return true;
     }
 
     bool writeFile(const std::string& path, const std::string& content, std::string& errorMsg) override {
-        if (!m_inner->writeFile(path, content, errorMsg)) return false;
-        m_cache.put(path, content);
+        const std::string key = normalizePath(path);
+        if (!m_inner->writeFile(key, content, errorMsg)) return false;
+        {
+            std::scoped_lock lock(m_cacheMutex);
+            m_cache.put(key, content);
+        }
         return true;
     }
 
     bool deleteFile(const std::string& path, std::string& errorMsg) override {
-        m_cache.erase(path);
-        return m_inner->deleteFile(path, errorMsg);
+        const std::string key = normalizePath(path);
+        {
+            std::scoped_lock lock(m_cacheMutex);
+            m_cache.erase(key);
+        }
+        return m_inner->deleteFile(key, errorMsg);
     }
 
     bool createDirectory(const std::string& path, std::string& errorMsg) override {
@@ -240,6 +260,7 @@ public:
 private:
     std::unique_ptr<FSProtocol> m_inner;
     LRUCache<std::string, std::string> m_cache;
+    std::mutex m_cacheMutex;
 };
 
 // 工厂函数：供 ProtocolFactory 使用

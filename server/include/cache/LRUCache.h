@@ -15,6 +15,7 @@ public:
 
     // 向缓存中放入数据
     void put(const K& key, const V& value) {
+        if (m_capacity == 0) return;
         // 检查 key 是否已存在
         auto it = m_lookup.find(key);
         if (it != m_lookup.end()) {

@@ -73,8 +73,9 @@ getFilePermission / submitForReview 更偏向 filesystem 侧 ACL/审核扩展与
 - snapshot：建议语义为“对某个 path 前缀下的数据做一致性快照”
 
 ### server 侧缓存（LRU）
-- server/src/protocol/FSProtocol.cpp 当前提供 CachingFSProtocol（文件内容缓存，容量64）
-- 对接真实 filesystem 时：你们可以保留该装饰器，让缓存继续工作（不侵入底层FS）
+- server/src/protocol/FSProtocol.cpp 提供 CachingFSProtocol（文件内容缓存，容量64）
+- 缓存键会做路径归一化（统一 / 分隔符与前导 /），并对多线程访问做互斥保护（适配 main.cpp 的并发模型）
+- 对接真实 filesystem 时：建议保留该装饰器，让缓存继续工作（不侵入底层FS，实现可替换）
 
 ---
 
