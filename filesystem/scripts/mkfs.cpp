@@ -1,14 +1,19 @@
-// mkfs.cpp
+// 修改 scripts/mkfs.cpp
 #include "../include/disk.h"
+#include "../include/inode.h"
 #include <unistd.h>
 #include <iostream>
 #include <cstring>
 using namespace std;
 
+// ...前面的代码...
+
+// 修改 scripts/mkfs.cpp 中的main函数:
+
 int main() {
     int fd = disk_open("../disk/disk.img");
 
-    // 扩展文件到 DISK_SIZE
+    // 扩展文件到新的DISK_SIZE
     lseek(fd, DISK_SIZE - 1, SEEK_SET);
     write(fd, "\0", 1);
 
@@ -33,9 +38,11 @@ int main() {
     // ---- block bitmap ----
     memset(buf, 0, BLOCK_SIZE);
 
-    // 前面的 block 已经被占用，需要标记为 1
+    // 标记已被使用的块为已占用，并设置引用计数
+    BlockBitmapEntry* entries = (BlockBitmapEntry*)buf;
     for (int i = 0; i < DATA_BLOCK_START; i++) {
-        buf[i / 8] |= (1 << (i % 8));
+        buf[i / 8] |= (1 << (i % 8));  // 标记为已分配
+        entries[i].ref_count = 1;       // 设置引用计数为1
     }
     write_block(fd, BLOCK_BITMAP_BLOCK, buf);
 
@@ -44,8 +51,26 @@ int main() {
     for (int i = 0; i < INODE_TABLE_BLOCK_COUNT; i++) {
         write_block(fd, INODE_TABLE_START + i, buf);
     }
+    
+    // ---- snapshot table (4 blocks) ----
+    memset(buf, 0, BLOCK_SIZE);
+    for (int i = 0; i < SNAPSHOT_TABLE_BLOCKS; i++) {
+        write_block(fd, SNAPSHOT_TABLE_START + i, buf);
+    }
 
-    cout << "disk.img 格式化完成！" << endl;
+    // ---- 创建根目录 ----
+    int root_inode_id = alloc_inode(fd);
+    if (root_inode_id != 0) {
+        cout << "错误：根目录inode ID应该是0，实际是" << root_inode_id << endl;
+        disk_close(fd);
+        return 1;
+    }
+    
+    Inode root_inode;
+    init_inode(&root_inode, INODE_TYPE_DIR);
+    write_inode(fd, root_inode_id, &root_inode);
+
+    cout << "disk.img 格式化完成！根目录创建成功。" << endl;
 
     disk_close(fd);
     return 0;

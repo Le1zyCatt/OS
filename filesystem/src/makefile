@@ -7,17 +7,27 @@ TEST_DIR = ../test
 
 TARGET_MKFS = $(BIN_DIR)/mkfs
 TARGET_TEST = $(BIN_DIR)/test_filesystem
+TARGET_SNAPSHOT_TEST = $(BIN_DIR)/test_snapshot
+TARGET_SNAPSHOT_TOOL = $(BIN_DIR)/snapshot_tool
 
-SRC = disk.cpp inode.cpp
+SRC = disk.cpp inode.cpp directory.cpp path.cpp
 OBJ = $(SRC:.cpp=.o)
 
-all: $(TARGET_MKFS) $(TARGET_TEST)
+all: $(TARGET_MKFS) $(TARGET_TEST) $(TARGET_SNAPSHOT_TEST) $(TARGET_SNAPSHOT_TOOL)
 
 $(TARGET_MKFS): $(OBJ) ../scripts/mkfs.o
 	mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
 $(TARGET_TEST): $(OBJ) $(TEST_DIR)/test_filesystem.o
+	mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+$(TARGET_SNAPSHOT_TEST): $(OBJ) $(TEST_DIR)/test_snapshot.o
+	mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+$(TARGET_SNAPSHOT_TOOL): $(OBJ) ../scripts/snapshot_tool.o
 	mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
@@ -32,6 +42,6 @@ $(TEST_DIR)/%.o: $(TEST_DIR)/%.cpp
 
 clean:
 	rm -f *.o ../scripts/*.o $(TEST_DIR)/*.o
-	rm -f $(TARGET_MKFS) $(TARGET_TEST)
+	rm -f $(TARGET_MKFS) $(TARGET_TEST) $(TARGET_SNAPSHOT_TEST) $(TARGET_SNAPSHOT_TOOL)
 
 .PHONY: all clean
