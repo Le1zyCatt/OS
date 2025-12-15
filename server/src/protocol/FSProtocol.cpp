@@ -11,6 +11,7 @@
 #include <unordered_set>
 
 #include "../../include/cache/LRUCache.h"
+#include "../../include/cache/CacheStatsProvider.h"
 
 namespace {
 
@@ -181,10 +182,25 @@ private:
     std::unordered_map<std::string, ReviewRequest> m_reviews;
 };
 
-class CachingFSProtocol : public FSProtocol {
+class CachingFSProtocol : public FSProtocol, public ICacheStatsProvider {
 public:
     explicit CachingFSProtocol(std::unique_ptr<FSProtocol> inner, size_t capacity)
-        : m_inner(std::move(inner)), m_cache(capacity) {}
+        : m_inner(std::move(inner)), m_cache(capacity), m_capacity(capacity) {}
+
+    CacheStats cacheStats() const override {
+        std::scoped_lock lock(m_cacheMutex);
+        return CacheStats{
+            m_cache.hits(),
+            m_cache.misses(),
+            m_cache.size(),
+            m_capacity,
+        };
+    }
+
+    void clearCache() override {
+        std::scoped_lock lock(m_cacheMutex);
+        m_cache.clear();
+    }
 
     bool createSnapshot(const std::string& path, const std::string& snapshotName, std::string& errorMsg) override {
         return m_inner->createSnapshot(path, snapshotName, errorMsg);
@@ -260,7 +276,8 @@ public:
 private:
     std::unique_ptr<FSProtocol> m_inner;
     LRUCache<std::string, std::string> m_cache;
-    std::mutex m_cacheMutex;
+    size_t m_capacity;
+    mutable std::mutex m_cacheMutex;
 };
 
 // 工厂函数：供 ProtocolFactory 使用

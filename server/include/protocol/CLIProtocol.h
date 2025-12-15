@@ -8,6 +8,7 @@ class PermissionChecker;
 class BackupFlow;
 class PaperService;
 class ReviewFlow;
+class ICacheStatsProvider;
 
 class CLIProtocol {
 public:
@@ -17,7 +18,8 @@ public:
                 PermissionChecker* perm,
                 BackupFlow* backup,
                 PaperService* paper,
-                ReviewFlow* review);
+                ReviewFlow* review,
+                ICacheStatsProvider* cacheStatsProvider = nullptr);
 
     // 解析并处理命令
     bool processCommand(const std::string& command, std::string& response);
@@ -29,4 +31,5 @@ private:
     BackupFlow* m_backupFlow;
     PaperService* m_paper;
     ReviewFlow* m_reviewFlow;
+    ICacheStatsProvider* m_cacheStatsProvider;
 };

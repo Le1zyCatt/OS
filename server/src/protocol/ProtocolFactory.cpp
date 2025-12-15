@@ -6,6 +6,7 @@
 #include "../../include/business/BackupFlow.h"
 #include "../../include/business/PaperService.h"
 #include "../../include/business/ReviewFlow.h"
+#include "../../include/cache/CacheStatsProvider.h"
 #include <memory>
 #include <string>
 #include <iostream>
@@ -22,6 +23,7 @@ public:
     Authenticator* getAuthenticator() { return authenticator.get(); }
     PermissionChecker* getPermissionChecker() { return permissionChecker.get(); }
     FSProtocol* getFSProtocol() { return fsProtocol.get(); }
+    ICacheStatsProvider* getCacheStatsProvider() { return cacheStatsProvider; }
     BackupFlow* getBackupFlow() { return backupFlow.get(); }
     PaperService* getPaperService() { return paperService.get(); }
     ReviewFlow* getReviewFlow() { return reviewFlow.get(); }
@@ -37,6 +39,7 @@ private:
     AppServices() {
         // 1. 创建核心服务
         fsProtocol = createFSProtocol();
+        cacheStatsProvider = dynamic_cast<ICacheStatsProvider*>(fsProtocol.get());
         authenticator = createAuthenticator();
         permissionChecker = std::make_unique<PermissionChecker>();
 
@@ -49,6 +52,7 @@ private:
 
     // 使用智能指针管理所有对象的生命周期
     std::unique_ptr<FSProtocol> fsProtocol;
+    ICacheStatsProvider* cacheStatsProvider = nullptr;
     std::unique_ptr<Authenticator> authenticator;
     std::unique_ptr<PermissionChecker> permissionChecker;
     std::unique_ptr<BackupFlow> backupFlow;
@@ -80,7 +84,8 @@ void ProtocolFactory::handleRequest(SOCKET clientSocket) {
         services.getPermissionChecker(),
         services.getBackupFlow(),
         services.getPaperService(),
-        services.getReviewFlow()
+        services.getReviewFlow(),
+        services.getCacheStatsProvider()
     );
 
     // 4. 处理命令

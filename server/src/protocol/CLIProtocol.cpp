@@ -5,6 +5,7 @@
 #include "../../include/business/BackupFlow.h"
 #include "../../include/business/PaperService.h"
 #include "../../include/business/ReviewFlow.h"
+#include "../../include/cache/CacheStatsProvider.h"
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -40,8 +41,15 @@ CLIProtocol::CLIProtocol(FSProtocol* fs,
                          PermissionChecker* perm,
                          BackupFlow* backup,
                          PaperService* paper,
-                         ReviewFlow* review)
-    : m_fs(fs), m_auth(auth), m_perm(perm), m_backupFlow(backup), m_paper(paper), m_reviewFlow(review) {}
+                                                 ReviewFlow* review,
+                                                 ICacheStatsProvider* cacheStatsProvider)
+        : m_fs(fs),
+            m_auth(auth),
+            m_perm(perm),
+            m_backupFlow(backup),
+            m_paper(paper),
+            m_reviewFlow(review),
+            m_cacheStatsProvider(cacheStatsProvider) {}
 
 bool CLIProtocol::processCommand(const std::string& command, std::string& response) {
     std::stringstream ss(command);
@@ -91,8 +99,63 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
         if (role == UserRole::AUTHOR) oss << "Author: PAPER_UPLOAD PAPER_REVISE REVIEWS_DOWNLOAD\n";
         if (role == UserRole::REVIEWER) oss << "Reviewer: REVIEW_SUBMIT\n";
         if (role == UserRole::EDITOR) oss << "Editor: ASSIGN_REVIEWER DECIDE REVIEWS_DOWNLOAD\n";
-        if (role == UserRole::ADMIN) oss << "Admin: USER_ADD USER_DEL USER_LIST BACKUP_CREATE BACKUP_LIST BACKUP_RESTORE SYSTEM_STATUS\n";
+        if (role == UserRole::ADMIN) oss << "Admin: USER_ADD USER_DEL USER_LIST BACKUP_CREATE BACKUP_LIST BACKUP_RESTORE SYSTEM_STATUS CACHE_STATS CACHE_CLEAR\n";
         response = oss.str();
+    } else if (cmd == "CACHE_STATS") {
+        std::string sessionId;
+        ss >> sessionId;
+        if (sessionId.empty()) {
+            response = "ERROR: Usage: CACHE_STATS <sessionToken>";
+            return false;
+        }
+
+        std::string username;
+        if (!m_auth->validateSession(sessionId, username, errorMsg)) {
+            response = "ERROR: Not authenticated: " + errorMsg;
+            return false;
+        }
+        const UserRole role = m_auth->getUserRole(sessionId);
+        if (!m_perm->hasPermission(role, Permission::SYSTEM_STATUS)) {
+            response = "ERROR: Permission denied.";
+            return false;
+        }
+        if (!m_cacheStatsProvider) {
+            response = "ERROR: Cache stats not available.";
+            return false;
+        }
+
+        const CacheStats s = m_cacheStatsProvider->cacheStats();
+        std::ostringstream oss;
+        oss << "OK: hits=" << s.hits
+            << " misses=" << s.misses
+            << " size=" << s.size
+            << " capacity=" << s.capacity;
+        response = oss.str();
+    } else if (cmd == "CACHE_CLEAR") {
+        std::string sessionId;
+        ss >> sessionId;
+        if (sessionId.empty()) {
+            response = "ERROR: Usage: CACHE_CLEAR <sessionToken>";
+            return false;
+        }
+
+        std::string username;
+        if (!m_auth->validateSession(sessionId, username, errorMsg)) {
+            response = "ERROR: Not authenticated: " + errorMsg;
+            return false;
+        }
+        const UserRole role = m_auth->getUserRole(sessionId);
+        if (!m_perm->hasPermission(role, Permission::SYSTEM_STATUS)) {
+            response = "ERROR: Permission denied.";
+            return false;
+        }
+        if (!m_cacheStatsProvider) {
+            response = "ERROR: Cache stats not available.";
+            return false;
+        }
+
+        m_cacheStatsProvider->clearCache();
+        response = "OK: Cache cleared.";
     } else if (cmd == "READ") {
         std::string sessionId, path, content;
         ss >> sessionId >> path;

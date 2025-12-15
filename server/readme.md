@@ -118,6 +118,11 @@ getFilePermission / submitForReview 更偏向 filesystem 侧 ACL/审核扩展与
 - BACKUP_RESTORE <token> <name>
 - SYSTEM_STATUS <token>
 
+### 缓存（LRU，可观测性/测试用）
+仅当 server 侧启用了缓存装饰器时可用（默认启用）。
+- CACHE_STATS <token>    # 查看缓存统计：hits/misses/size/capacity
+- CACHE_CLEAR <token>    # 清空缓存
+
 内置测试账号（可在 src/auth/Authenticator.cpp 修改）：
 - admin/admin123
 - editor/editor123

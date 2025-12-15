@@ -196,7 +196,7 @@ class ServerClient:
 # ----------------------------
 
 def print_local_help() -> None:
-        """统一帮助（全中文）。
+        """统一帮助。
 
         设计目标：
             - 你输入 :help 与输入 HELP/help，看到的内容完全一致
@@ -205,7 +205,7 @@ def print_local_help() -> None:
 
         print(
                 """\
-==================== 帮助（统一输出，全中文）====================
+==================== 帮助 ====================
 
 [如何使用]
 1) 先登录：LOGIN <用户名> <密码>
@@ -224,36 +224,36 @@ def print_local_help() -> None:
 
 ===============================================================
 """
-        )
+    )
 
 
 def _translate_server_help_to_chinese(resp: str) -> str:
-        """将 server 返回的 HELP 文本做最小中文化。
+    """将 server 返回的 HELP 文本做最小中文化。
 
-        注意：
-            - 命令关键字保持原样（LOGIN/READ/...）
-            - 仅把提示语/标签翻译成中文，保证“全部中文输出”的体验
-        """
+    注意：
+      - 命令关键字保持原样（LOGIN/READ/...）
+      - 仅把提示语/标签翻译成中文，保证“全部中文输出”的体验
+    """
 
-        if not resp:
-                return "(空响应)"
+    if not resp:
+        return "(空响应)"
 
-        if resp.startswith("ERROR:"):
-                return "错误：" + resp[len("ERROR:") :].lstrip()
+    if resp.startswith("ERROR:"):
+        return "错误：" + resp[len("ERROR:") :].lstrip()
 
-        if not resp.startswith("OK:"):
-                return resp
+    if not resp.startswith("OK:"):
+        return resp
 
-        text = resp
-        text = text.replace("OK:", "成功：")
-        text = text.replace("ROLE=", "角色=")
-        text = text.replace("Commands:", "可用命令：")
-        text = text.replace("Common:", "通用：")
-        text = text.replace("Author:", "作者：")
-        text = text.replace("Reviewer:", "审稿人：")
-        text = text.replace("Editor:", "编辑：")
-        text = text.replace("Admin:", "管理员：")
-        return text
+    text = resp
+    text = text.replace("OK:", "成功：")
+    text = text.replace("ROLE=", "角色=")
+    text = text.replace("Commands:", "可用命令：")
+    text = text.replace("Common:", "通用：")
+    text = text.replace("Author:", "作者：")
+    text = text.replace("Reviewer:", "审稿人：")
+    text = text.replace("Editor:", "编辑：")
+    text = text.replace("Admin:", "管理员：")
+    return text
 
 
 def print_all_server_commands() -> None:
@@ -298,6 +298,8 @@ def print_all_server_commands() -> None:
   BACKUP_LIST <token>
   BACKUP_RESTORE <token> <name>
   SYSTEM_STATUS <token>
+    CACHE_STATS <token>
+    CACHE_CLEAR <token>
 
 审核（ReviewFlow，当前实现为“提交审核请求”）：
   SUBMIT_REVIEW <token> <operation> <path>
@@ -332,6 +334,38 @@ def print_manual_test_cases() -> None:
   USER_DEL test_u1
   USER_LIST
   SYSTEM_STATUS
+
+[用例 1.1] LRU 缓存（命中/未命中/淘汰）——建议 admin 执行
+    说明：CACHE_STATS / CACHE_CLEAR 仅用于测试观测，要求管理员权限。
+    (1) 查看初始统计
+        CACHE_STATS
+    (2) 清空缓存（确保统计从干净状态开始）
+        CACHE_CLEAR
+        CACHE_STATS
+    (3) 命中测试：重复读取同一个文件
+        MKDIR /lru
+        WRITE /lru/a hello
+        CACHE_CLEAR
+        READ /lru/a          # 第一次：miss
+        READ /lru/a          # 第二次：hit
+        CACHE_STATS
+    (4) 淘汰测试：读超过 capacity 的不同 key（默认 capacity=64）
+        # 先准备文件（写入后会写入缓存，所以要再清空一次）
+        WRITE /lru/f01 v01
+        WRITE /lru/f02 v02
+        ...
+        WRITE /lru/f70 v70
+        CACHE_CLEAR
+        # 依次读取 f01~f70（此时 miss 会快速增长，cache size 最终应为 64）
+        READ /lru/f01
+        READ /lru/f02
+        ...
+        READ /lru/f70
+        CACHE_STATS
+        # 再读一次 f01（大概率已被淘汰）与 f70（大概率仍在缓存）
+        READ /lru/f01
+        READ /lru/f70
+        CACHE_STATS
 
 [用例 2] 文件读写（通用调试）
   MKDIR /tmp
@@ -474,6 +508,11 @@ def run_interactive_shell(client: ServerClient) -> int:
             # 3) 其他命令：默认自动注入 token
             resp = client.send(line)
             print(resp)
+        except EOFError:
+            # 当脚本在没有交互输入的环境下运行（stdin 关闭）会抛 EOFError。
+            # 这里做“友好退出”，避免返回码为 1。
+            print("\n检测到输入流结束（EOF），已退出。")
+            return 0
         except KeyboardInterrupt:
             print("\n检测到 Ctrl+C，已退出。")
             return 0
