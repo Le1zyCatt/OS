@@ -3,14 +3,15 @@
 #include <cstring>
 
 // 向目录中添加条目
-int dir_add_entry(int fd, Inode* dir_inode, int dir_inode_id, const char* name, int inode_id) {
+int dir_add_entry(int fd, Inode* dir_inode, int dir_inode_id, 
+                  const char* name, int inode_id) {
     if (dir_inode->type != INODE_TYPE_DIR) {
-        return -1; // 不是目录
+        return -1;
     }
     
-    // 检查是否已存在同名条目
+    // 第一步：验证不存在同名条目
     if (dir_find_entry(fd, dir_inode, name) != -1) {
-        return -1; // 条目已存在
+        return -1;
     }
     
     // 创建新目录项
@@ -19,12 +20,13 @@ int dir_add_entry(int fd, Inode* dir_inode, int dir_inode_id, const char* name, 
     strncpy(new_entry.name, name, DIR_NAME_SIZE - 1);
     new_entry.name[DIR_NAME_SIZE - 1] = '\0';
     
-    // 将目录项添加到目录数据中
+    // 第二步：写入目录项（原子操作，inode_write_data已支持原子性）
     int entry_index = dir_inode->size / sizeof(DirEntry);
     int offset = entry_index * sizeof(DirEntry);
     
     int result = inode_write_data(fd, dir_inode, dir_inode_id, 
-                                  (char*)&new_entry, offset, sizeof(DirEntry));
+                                  (const char*)&new_entry, 
+                                  offset, sizeof(DirEntry));
     
     return (result == sizeof(DirEntry)) ? 0 : -1;
 }

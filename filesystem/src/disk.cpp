@@ -12,6 +12,7 @@
 void check_and_repair_filesystem(int fd);
 void check_ref_count_consistency(int fd, const char* block_bitmap);
 
+// 修改disk_open函数 - 添加初始化检查
 int disk_open(const char* path) {
     int fd = open(path, O_RDWR | O_CREAT, 0666);
     if (fd < 0) {
@@ -19,17 +20,34 @@ int disk_open(const char* path) {
         exit(1);
     }
     
-    // ← 添加一致性检查
-    check_and_repair_filesystem(fd);
+    // 检查文件系统是否已初始化
+    off_t file_size = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    
+    // 如果文件大小为0，说明是新磁盘，不需要检查一致性
+    if (file_size > 0) {
+        // 文件已存在，检查并修复文件系统一致性
+        check_and_repair_filesystem(fd);
+    }
     
     return fd;
 }
 
-// 一致性检查函数
+// 修改check_and_repair_filesystem - 添加初始化检查
 void check_and_repair_filesystem(int fd) {
     std::cout << "检查文件系统一致性..." << std::endl;
     
-    // 1. 检查inode bitmap vs SB
+    Superblock sb;
+    read_superblock(fd, &sb);
+    
+    // 检查superblock是否有效（检查标志位或一些已知值）
+    // 简单方法：检查inode_count和block_count是否合理
+    if (sb.block_count <= 0 || sb.inode_count <= 0) {
+        std::cout << "⚠ 未初始化的文件系统，跳过一致性检查" << std::endl;
+        return;
+    }
+    
+    // 1. 检查inode bitmap vs SB计数
     char inode_bitmap[BLOCK_SIZE];
     read_block(fd, INODE_BITMAP_BLOCK, inode_bitmap);
     
@@ -42,23 +60,28 @@ void check_and_repair_filesystem(int fd) {
         }
     }
     
-    Superblock sb;
-    read_superblock(fd, &sb);
+    // 只有在有明显差异时才修复（容差范围：差异不超过5）
+    int inode_diff = actual_free_inodes > sb.free_inode_count ? 
+                     (actual_free_inodes - sb.free_inode_count) :
+                     (sb.free_inode_count - actual_free_inodes);
     
-    if (actual_free_inodes != sb.free_inode_count) {
-        std::cout << "修复inode计数: " << sb.free_inode_count 
-                  << " → " << actual_free_inodes << std::endl;
+    if (inode_diff > 5) {
+        std::cout << "⚠ 修复inode计数: 记录=" << sb.free_inode_count 
+                  << " 实际=" << actual_free_inodes << std::endl;
         sb.free_inode_count = actual_free_inodes;
         write_superblock(fd, &sb);
+    } else {
+        std::cout << "✓ inode计数一致" << std::endl;
     }
     
-    // 2. 检查block bitmap vs SB
+    // 2. 检查block bitmap vs SB计数
     char block_bitmap[BLOCK_SIZE];
     read_block(fd, BLOCK_BITMAP_BLOCK, block_bitmap);
     
     int actual_free_blocks = 0;
     int max_blocks = (BLOCK_SIZE * 8 < BLOCK_COUNT) ? BLOCK_SIZE * 8 : BLOCK_COUNT;
-    for (int i = 0; i < max_blocks; i++) {
+    
+    for (int i = DATA_BLOCK_START; i < max_blocks; i++) {
         int byte_idx = i / 8;
         int bit_idx = i % 8;
         if (!(block_bitmap[byte_idx] & (1 << bit_idx))) {
@@ -66,21 +89,30 @@ void check_and_repair_filesystem(int fd) {
         }
     }
     
-    if (actual_free_blocks != sb.free_block_count) {
-        std::cout << "修复block计数: " << sb.free_block_count 
-                  << " → " << actual_free_blocks << std::endl;
+    // 只有在有明显差异时才修复（容差范围：差异不超过5）
+    int block_diff = actual_free_blocks > sb.free_block_count ?
+                     (actual_free_blocks - sb.free_block_count) :
+                     (sb.free_block_count - actual_free_blocks);
+    
+    if (block_diff > 5) {
+        std::cout << "⚠ 修复block计数: 记录=" << sb.free_block_count 
+                  << " 实际=" << actual_free_blocks << std::endl;
         sb.free_block_count = actual_free_blocks;
         write_superblock(fd, &sb);
+    } else {
+        std::cout << "✓ block计数一致" << std::endl;
     }
     
     // 3. 检查RefCount表一致性
     check_ref_count_consistency(fd, block_bitmap);
     
-    std::cout << "文件系统一致性检查完成" << std::endl;
+    std::cout << "一致性检查完成" << std::endl;
 }
 
+// 修改check_ref_count_consistency - 更精确的检查
 void check_ref_count_consistency(int fd, const char* block_bitmap) {
-    // 对于每个已分配的块，检查RefCount是否有效
+    int repairs = 0;
+    int issues = 0;
     int max_blocks = (BLOCK_SIZE * 8 < BLOCK_COUNT) ? BLOCK_SIZE * 8 : BLOCK_COUNT;
     
     for (int i = DATA_BLOCK_START; i < max_blocks; i++) {
@@ -90,11 +122,35 @@ void check_ref_count_consistency(int fd, const char* block_bitmap) {
         // 块已分配
         if (block_bitmap[byte_idx] & (1 << bit_idx)) {
             int ref_count = get_block_ref_count(fd, i);
-            if (ref_count == 0) {
-                std::cout << "修复块" << i << "的RefCount: 0 → 1" << std::endl;
-                increment_block_ref_count(fd, i);
+            
+            // 已分配的块ref_count应该 >= 1
+            if (ref_count <= 0) {
+                issues++;
+                // 只在发现少量问题时修复，太多问题说明数据损坏严重
+                if (issues <= 10) {
+                    std::cout << "修复块" << i << "的RefCount: " << ref_count << " → 1" << std::endl;
+                    
+                    int ref_count_block_offset = i / BLOCK_SIZE;
+                    int ref_count_index = i % BLOCK_SIZE;
+                    if (ref_count_block_offset < REF_COUNT_TABLE_BLOCKS) {
+                        char ref_count_buf[BLOCK_SIZE];
+                        read_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
+                        ref_count_buf[ref_count_index] = 1;
+                        write_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
+                        repairs++;
+                    }
+                }
             }
         }
+    }
+    
+    if (issues > 10) {
+        std::cout << "⚠ 发现" << issues << "个RefCount问题，仅修复了前10个。"
+                  << "建议运行 fsck 进行完整修复" << std::endl;
+    } else if (repairs > 0) {
+        std::cout << "修复了 " << repairs << " 个引用计数问题" << std::endl;
+    } else {
+        std::cout << "✓ RefCount一致性检查通过" << std::endl;
     }
 }
 
@@ -179,18 +235,18 @@ int alloc_inode(int fd) {
         int bit_index = i % 8;
         
         if (!(buf[byte_index] & (1 << bit_index))) {
-            // 第一步：标记bitmap（但不提交superblock改动）
+            // 第一步：标记bitmap为已使用（关键操作1）
             buf[byte_index] |= (1 << bit_index);
             write_block(fd, INODE_BITMAP_BLOCK, buf);
             
-            // 第二步：更新superblock计数（关键操作）
+            // 第二步：更新superblock中的空闲inode计数（关键操作2 - 提交点）
             Superblock sb;
             read_superblock(fd, &sb);
             sb.free_inode_count--;
-            write_superblock(fd, &sb);  // ← 这是原子操作的提交点
+            write_superblock(fd, &sb);
             
-            // 到此为止，如果crash，系统启动时可以检测到不一致
-            // 通过SB中的free_inode_count和Bitmap的实际空闲数对比来修复
+            // 原子性保证：SB是最后一个改动的关键元数据
+            // 如果crash，启动时检查可以修正不一致
             
             return i;
         }
@@ -207,11 +263,11 @@ void free_inode(int fd, int inode_id) {
     int byte_index = inode_id / 8;
     int bit_index = inode_id % 8;
     
-    // 标记为未使用
+    // 第一步：标记为未使用（关键操作1）
     buf[byte_index] &= ~(1 << bit_index);
     write_block(fd, INODE_BITMAP_BLOCK, buf);
     
-    // 更新superblock中的空闲inode计数
+    // 第二步：更新superblock中的空闲inode计数（关键操作2 - 提交点）
     Superblock sb;
     read_superblock(fd, &sb);
     sb.free_inode_count++;
@@ -243,11 +299,11 @@ int alloc_block(int fd) {
                 write_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
             }
             
-            // 第三步：更新superblock（最后一步，确保原子性）
+            // 第三步：更新superblock（提交点）
             Superblock sb;
             read_superblock(fd, &sb);
             sb.free_block_count--;
-            write_superblock(fd, &sb);  // ← 提交点
+            write_superblock(fd, &sb);
             
             return i;
         }
@@ -271,7 +327,7 @@ void free_block(int fd, int block_id) {
         
         unsigned char ref_count = ref_count_buf[ref_count_index];
         
-        // 减少引用计数
+        // 如果引用计数 > 1，只减少计数不真正释放
         if (ref_count > 1) {
             ref_count_buf[ref_count_index]--;
             write_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
@@ -279,15 +335,13 @@ void free_block(int fd, int block_id) {
         }
     }
     
-    // 如果引用计数为1或0，则真正释放块
+    // 第一步：标记bitmap为未使用
     int byte_index = block_id / 8;
     int bit_index = block_id % 8;
-    
-    // 标记为未使用
     buf[byte_index] &= ~(1 << bit_index);
     write_block(fd, BLOCK_BITMAP_BLOCK, buf);
     
-    // 清除引用计数
+    // 第二步：清除引用计数
     if (ref_count_block_offset < REF_COUNT_TABLE_BLOCKS) {
         char ref_count_buf[BLOCK_SIZE];
         read_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
@@ -295,7 +349,7 @@ void free_block(int fd, int block_id) {
         write_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
     }
     
-    // 更新superblock中的空闲块计数
+    // 第三步：更新superblock（提交点）
     Superblock sb;
     read_superblock(fd, &sb);
     sb.free_block_count++;

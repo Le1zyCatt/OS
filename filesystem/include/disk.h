@@ -5,7 +5,7 @@
 #include <cstdint>
 
 const int BLOCK_SIZE = 1024;               // 1KB block
-const int DISK_SIZE  = 100 * 1024 * 1024;   // 100MB
+const int DISK_SIZE  = 8 * 1024 * 1024;     // 8MB
 const int BLOCK_COUNT = DISK_SIZE / BLOCK_SIZE;
 
 const int POINTERS_PER_BLOCK = BLOCK_SIZE / sizeof(int);  // 每个块能存放多少个块指针
