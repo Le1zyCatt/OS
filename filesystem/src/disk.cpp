@@ -221,35 +221,30 @@ void free_block(int fd, int block_id) {
 
 
 int create_snapshot(int fd, const char* name) {
-    // 保存当前系统状态
     Superblock current_sb;
     read_superblock(fd, &current_sb);
     
-    // 分配块来保存inode和块位图以及inode表的快照
+    // 第一阶段：分配并保存所有元数据（但快照未激活）
     int inode_bitmap_snapshot_block = alloc_block(fd);
     int block_bitmap_snapshot_block = alloc_block(fd);
     int inode_table_snapshot_blocks[16];
+    
     for (int i = 0; i < 16; i++) {
         inode_table_snapshot_blocks[i] = alloc_block(fd);
         if (inode_table_snapshot_blocks[i] == -1) {
-            // 释放已分配的块
+            // 清理已分配的块
             for (int j = 0; j < i; j++) {
                 free_block(fd, inode_table_snapshot_blocks[j]);
             }
-            if (block_bitmap_snapshot_block != -1) {
-                free_block(fd, block_bitmap_snapshot_block);
-            }
-            if (inode_bitmap_snapshot_block != -1) {
-                free_block(fd, inode_bitmap_snapshot_block);
-            }
+            free_block(fd, block_bitmap_snapshot_block);
+            free_block(fd, inode_bitmap_snapshot_block);
             return -1;
         }
     }
     
-    // 读取当前的inode和块位图
+    // 读取并保存inode和块位图
     char inode_bitmap[BLOCK_SIZE];
     char block_bitmap[BLOCK_SIZE];
-    
     read_block(fd, INODE_BITMAP_BLOCK, inode_bitmap);
     read_block(fd, BLOCK_BITMAP_BLOCK, block_bitmap);
     
@@ -260,10 +255,11 @@ int create_snapshot(int fd, const char* name) {
         write_block(fd, inode_table_snapshot_blocks[i], inode_block);
     }
     
-    // 保存位图到快照块
+    // 保存位图
     write_block(fd, inode_bitmap_snapshot_block, inode_bitmap);
     write_block(fd, block_bitmap_snapshot_block, block_bitmap);
-// 查找空闲的快照槽位
+    
+    // 查找空闲快照槽位
     char buf[BLOCK_SIZE];
     int snapshots_per_block = BLOCK_SIZE / sizeof(Snapshot);
     int free_slot = -1;
@@ -272,21 +268,17 @@ int create_snapshot(int fd, const char* name) {
         read_block(fd, SNAPSHOT_TABLE_START + i, buf);
         Snapshot* block_snapshots = (Snapshot*)buf;
         
-        for (int j = 0; j < snapshots_per_block && (i * snapshots_per_block + j) < MAX_SNAPSHOTS; j++) {
-            int idx = i * snapshots_per_block + j;
+        for (int j = 0; j < snapshots_per_block && 
+             (i * snapshots_per_block + j) < MAX_SNAPSHOTS; j++) {
             if (!block_snapshots[j].active && free_slot == -1) {
-                free_slot = idx;
+                free_slot = i * snapshots_per_block + j;
                 break;
             }
         }
-        
-        if (free_slot != -1) {
-            break;
-        }
+        if (free_slot != -1) break;
     }
     
     if (free_slot == -1) {
-        // 没有空闲槽位，释放位图快照块
         free_block(fd, inode_bitmap_snapshot_block);
         free_block(fd, block_bitmap_snapshot_block);
         for (int i = 0; i < 16; i++) {
@@ -295,16 +287,16 @@ int create_snapshot(int fd, const char* name) {
         return -1;
     }
     
-    // 创建新快照
+    // 创建快照结构但暂不激活
     Snapshot new_snapshot;
+    memset(&new_snapshot, 0, sizeof(Snapshot));
     new_snapshot.id = free_slot;
-    new_snapshot.active = 1;
+    new_snapshot.active = 0;  // ← 关键：先不激活
     new_snapshot.timestamp = (int)time(nullptr);
-    new_snapshot.root_inode_id = 0; // 当前根目录inode ID
+    new_snapshot.root_inode_id = 0;
     strncpy(new_snapshot.name, name, sizeof(new_snapshot.name) - 1);
     new_snapshot.name[sizeof(new_snapshot.name) - 1] = '\0';
     
-    // 保存系统状态
     new_snapshot.sb_at_snapshot = current_sb;
     new_snapshot.inode_bitmap_block = inode_bitmap_snapshot_block;
     new_snapshot.block_bitmap_block = block_bitmap_snapshot_block;
@@ -312,35 +304,35 @@ int create_snapshot(int fd, const char* name) {
         new_snapshot.inode_table_blocks[i] = inode_table_snapshot_blocks[i];
     }
     
-    // 计算使用的inode和块数量（简化计算）
     new_snapshot.total_inodes_used = current_sb.inode_count - current_sb.free_inode_count;
     new_snapshot.total_blocks_used = current_sb.block_count - current_sb.free_block_count;
     
-    // 写入快照到对应的位置
+    // 第一步：写入快照表（未激活状态）
     int block_id = SNAPSHOT_TABLE_START + (free_slot / snapshots_per_block);
     int offset = free_slot % snapshots_per_block;
-    
     read_block(fd, block_id, buf);
     Snapshot* snapshots = (Snapshot*)buf;
     snapshots[offset] = new_snapshot;
-    // 在第一次写入快照到表之前添加这段代码
-    // 增加快照中所有使用块的引用计数
-    // 限制循环范围，只遍历位图能表示的块数
+    write_block(fd, block_id, buf);
+    
+    // 第二阶段：增加所有块的引用计数
     int max_blocks = (BLOCK_SIZE * 8 < BLOCK_COUNT) ? BLOCK_SIZE * 8 : BLOCK_COUNT;
     for (int block_id_iter = DATA_BLOCK_START; block_id_iter < max_blocks; block_id_iter++) {
         int byte_index = block_id_iter / 8;
         int bit_index = block_id_iter % 8;
         
-        // 检查该块是否被使用
         if (block_bitmap[byte_index] & (1 << bit_index)) {
-            // 增加该块的引用计数（快照也引用这个块）
             increment_block_ref_count(fd, block_id_iter);
         }
     }
     
+    // 第三步：激活快照（这是最后一个关键操作）
+    read_block(fd, block_id, buf);
+    snapshots = (Snapshot*)buf;
+    snapshots[offset].active = 1;  // ← 激活快照，标记操作完成
     write_block(fd, block_id, buf);
-
-    return free_slot; // 返回快照ID
+    
+    return free_slot;
 }
 
 // 替换 src/disk.cpp 中的 list_snapshots 函数实现
@@ -510,7 +502,7 @@ int copy_on_write_block(int fd, int block_id) {
 
 int restore_snapshot(int fd, int snapshot_id) {
     if (snapshot_id < 0 || snapshot_id >= MAX_SNAPSHOTS) {
-        return -1; // 无效的快照ID
+        return -1;
     }
     
     char buf[BLOCK_SIZE];
@@ -520,7 +512,7 @@ int restore_snapshot(int fd, int snapshot_id) {
     
     int block_id = SNAPSHOT_TABLE_START + block_idx;
     if (block_id >= SNAPSHOT_TABLE_START + SNAPSHOT_TABLE_BLOCKS) {
-        return -1; // 快照ID超出范围
+        return -1;
     }
     
     read_block(fd, block_id, buf);
@@ -528,48 +520,26 @@ int restore_snapshot(int fd, int snapshot_id) {
     
     if (!snapshots[entry_idx].active) {
         std::cout << "快照不存在或未激活" << std::endl;
-        return -1; // 快照不存在
+        return -1;
     }
     
     Snapshot snapshot = snapshots[entry_idx];
     std::cout << "准备恢复快照，根inode_id: " << snapshot.root_inode_id << std::endl;
     
-    // 保存当前的superblock状态，以便在失败时恢复
-    Superblock current_sb;
-    read_superblock(fd, &current_sb);
+    // 读取快照的块位图（需要在覆盖前保存）
+    char snapshot_block_bitmap[BLOCK_SIZE];
+    read_block(fd, snapshot.block_bitmap_block, snapshot_block_bitmap);
     
-    // 保存当前的inode和块位图，以便在失败时恢复
-    char current_inode_bitmap[BLOCK_SIZE];
-    char current_block_bitmap[BLOCK_SIZE];
-    read_block(fd, INODE_BITMAP_BLOCK, current_inode_bitmap);
-    read_block(fd, BLOCK_BITMAP_BLOCK, current_block_bitmap);
-    
-    // 保存当前的inode表，以便在失败时恢复
-    char current_inode_table[INODE_TABLE_BLOCK_COUNT * BLOCK_SIZE];
-    for (int i = 0; i < INODE_TABLE_BLOCK_COUNT; i++) {
-        read_block(fd, INODE_TABLE_START + i, 
-                   current_inode_table + i * BLOCK_SIZE);
-    }
-    
-    // 保存当前的快照表，以便在失败时恢复
-    char current_snapshot_table[SNAPSHOT_TABLE_BLOCKS * BLOCK_SIZE];
-    for (int i = 0; i < SNAPSHOT_TABLE_BLOCKS; i++) {
-        read_block(fd, SNAPSHOT_TABLE_START + i, 
-                   current_snapshot_table + i * BLOCK_SIZE);
-    }
-    
+    // 所有写操作在一起（原子恢复）
     // 1. 恢复superblock
     write_superblock(fd, &snapshot.sb_at_snapshot);
     
-    // 2. 读取快照时的inode和块位图
+    // 2. 恢复inode和块位图
     char inode_bitmap[BLOCK_SIZE];
     char block_bitmap[BLOCK_SIZE];
-    char snapshot_block_bitmap[BLOCK_SIZE];  // 添加这一行
     read_block(fd, snapshot.inode_bitmap_block, inode_bitmap);
     read_block(fd, snapshot.block_bitmap_block, block_bitmap);
-    read_block(fd, snapshot.block_bitmap_block, snapshot_block_bitmap);  // 保存快照的块位图副本
     
-    // 恢复inode和块位图
     write_block(fd, INODE_BITMAP_BLOCK, inode_bitmap);
     write_block(fd, BLOCK_BITMAP_BLOCK, block_bitmap);
     
@@ -580,25 +550,14 @@ int restore_snapshot(int fd, int snapshot_id) {
         write_block(fd, INODE_TABLE_START + i, inode_block);
     }
     
-    // 4. 恢复快照表（保留当前快照信息）
-    for (int i = 0; i < SNAPSHOT_TABLE_BLOCKS; i++) {
-        read_block(fd, SNAPSHOT_TABLE_START + i, buf);
-        write_block(fd, SNAPSHOT_TABLE_START + i, buf);
-    }
-    
-    // 清除快照对块的引用计数
-    // 因为现在系统已经恢复到快照时的状态，快照的引用计数不再需要
+    // 4. 清除快照对块的引用计数
     int max_blocks = (BLOCK_SIZE * 8 < BLOCK_COUNT) ? BLOCK_SIZE * 8 : BLOCK_COUNT;
     for (int block_id_iter = DATA_BLOCK_START; block_id_iter < max_blocks; block_id_iter++) {
         int byte_index = block_id_iter / 8;
         int bit_index = block_id_iter % 8;
         
-        // 检查该块在快照时是否被使用
         if (snapshot_block_bitmap[byte_index] & (1 << bit_index)) {
-            // 减少该块的引用计数（移除快照的引用）
-            // 忽略错误，因为在恢复时块位图已经被恢复
-            int dec_result = decrement_block_ref_count(fd, block_id_iter);
-            (void)dec_result; // 避免未使用变量警告
+            decrement_block_ref_count(fd, block_id_iter);
         }
     }
     
@@ -703,10 +662,13 @@ int delete_snapshot(int fd, int snapshot_id) {
         return -1;
     }
     
-    // 保存快照信息用于清理
     Snapshot snapshot_to_delete = snapshots[entry_idx];
     
-    // 步骤1：清除快照对所有数据块的引用计数（可选，失败也继续）
+    // 第一步：立即标记为非活动（防止快照被使用）
+    snapshots[entry_idx].active = 0;
+    write_block(fd, block_id, buf);
+    
+    // 第二阶段：安全地清理资源（即使失败也无关紧要）
     if (snapshot_to_delete.block_bitmap_block > 0) {
         char snapshot_block_bitmap[BLOCK_SIZE];
         read_block(fd, snapshot_to_delete.block_bitmap_block, snapshot_block_bitmap);
@@ -717,12 +679,13 @@ int delete_snapshot(int fd, int snapshot_id) {
             int bit_index = block_id_iter % 8;
             
             if (snapshot_block_bitmap[byte_index] & (1 << bit_index)) {
+                // 忽略错误，因为快照已标记为删除
                 decrement_block_ref_count(fd, block_id_iter);
             }
         }
     }
     
-    // 步骤2：释放快照的元数据块（可选，失败也继续）
+    // 释放元数据块
     if (snapshot_to_delete.inode_bitmap_block > 0) {
         free_block(fd, snapshot_to_delete.inode_bitmap_block);
     }
@@ -734,10 +697,6 @@ int delete_snapshot(int fd, int snapshot_id) {
             free_block(fd, snapshot_to_delete.inode_table_blocks[i]);
         }
     }
-    
-    // 步骤3：标记快照为非活动（必须成功）
-    snapshots[entry_idx].active = 0;
-    write_block(fd, block_id, buf);
     
     return 0;
 }

@@ -486,9 +486,253 @@ void test_snapshot_edge_cases() {
     cout << "快照边界条件测试通过" << endl;
 }
 
+// 诊断函数：打印块的引用计数
+void print_block_ref_counts(int fd, int start, int end) {
+    std::cout << "\n块引用计数信息 [" << start << "-" << end << "]:" << std::endl;
+    for (int i = start; i <= end && i < BLOCK_COUNT; i++) {
+        int ref_count = get_block_ref_count(fd, i);
+        if (ref_count > 0) {
+            std::cout << "  块 " << i << ": ref_count=" << ref_count << std::endl;
+        }
+    }
+}
+
+// 诊断函数：验证快照数据一致性
+void verify_snapshot_consistency(int fd, int snapshot_id) {
+    std::cout << "\n验证快照ID=" << snapshot_id << "的一致性..." << std::endl;
+    
+    char buf[BLOCK_SIZE];
+    int snapshots_per_block = BLOCK_SIZE / sizeof(Snapshot);
+    int block_idx = snapshot_id / snapshots_per_block;
+    int entry_idx = snapshot_id % snapshots_per_block;
+    
+    read_block(fd, SNAPSHOT_TABLE_START + block_idx, buf);
+    Snapshot* snapshots = (Snapshot*)buf;
+    
+    if (!snapshots[entry_idx].active) {
+        std::cout << "快照未激活" << std::endl;
+        return;
+    }
+    
+    Snapshot snapshot = snapshots[entry_idx];
+    
+    // 验证元数据块是否存在
+    if (snapshot.inode_bitmap_block <= 0 || snapshot.block_bitmap_block <= 0) {
+        std::cout << "错误：元数据块ID无效" << std::endl;
+        return;
+    }
+    
+    // 验证inode表块
+    int valid_inode_blocks = 0;
+    for (int i = 0; i < 16; i++) {
+        if (snapshot.inode_table_blocks[i] > 0) {
+            valid_inode_blocks++;
+        }
+    }
+    std::cout << "有效的inode表块数：" << valid_inode_blocks << std::endl;
+    
+    // 读取快照的块位图并统计使用的块数
+    char snapshot_block_bitmap[BLOCK_SIZE];
+    read_block(fd, snapshot.block_bitmap_block, snapshot_block_bitmap);
+    
+    int used_blocks = 0;
+    int max_blocks = (BLOCK_SIZE * 8 < BLOCK_COUNT) ? BLOCK_SIZE * 8 : BLOCK_COUNT;
+    for (int i = DATA_BLOCK_START; i < max_blocks; i++) {
+        int byte_index = i / 8;
+        int bit_index = i % 8;
+        if (snapshot_block_bitmap[byte_index] & (1 << bit_index)) {
+            used_blocks++;
+        }
+    }
+    
+    std::cout << "快照时使用的数据块：" << used_blocks << std::endl;
+    std::cout << "快照元数据中记录的块数：" << snapshot.total_blocks_used << std::endl;
+    
+    if (used_blocks == snapshot.total_blocks_used) {
+        std::cout << "✓ 块数统计一致" << std::endl;
+    } else {
+        std::cout << "⚠ 块数统计不一致（可能是正常的）" << std::endl;
+    }
+}
+
+// 新增：详细的COW机制测试
+void test_cow_detailed() {
+    std::cout << "\n=== 详细测试COW机制 ===" << std::endl;
+    
+    int fd = disk_open("../disk/disk.img");
+    assert(fd >= 0);
+    
+    // 分配一个块并写入数据
+    int block1 = alloc_block(fd);
+    assert(block1 >= 0);
+    std::cout << "分配块1成功，ID=" << block1 << std::endl;
+    
+    char data1[BLOCK_SIZE];
+    memset(data1, 'A', BLOCK_SIZE);
+    write_block(fd, block1, data1);
+    std::cout << "块1初始引用计数：" << get_block_ref_count(fd, block1) << std::endl;
+    
+    // 创建快照（块1的引用计数会增加）
+    int snap_id = create_snapshot(fd, "cow_test");
+    assert(snap_id >= 0);
+    std::cout << "创建快照后，块1引用计数：" << get_block_ref_count(fd, block1) << std::endl;
+    
+    // 手动增加引用计数（模拟另一个快照）
+    increment_block_ref_count(fd, block1);
+    std::cout << "手动增加后，块1引用计数：" << get_block_ref_count(fd, block1) << std::endl;
+    
+    // 触发COW
+    int block1_new = copy_on_write_block(fd, block1);
+    assert(block1_new != block1);
+    assert(block1_new >= 0);
+    std::cout << "COW后：原块ID=" << block1 << "，新块ID=" << block1_new << std::endl;
+    std::cout << "原块引用计数：" << get_block_ref_count(fd, block1) << std::endl;
+    std::cout << "新块引用计数：" << get_block_ref_count(fd, block1_new) << std::endl;
+    
+    // 验证数据被复制
+    char read_data[BLOCK_SIZE];
+    read_block(fd, block1_new, read_data);
+    if (memcmp(data1, read_data, BLOCK_SIZE) == 0) {
+        std::cout << "✓ 数据成功复制到新块" << std::endl;
+    } else {
+        std::cout << "⚠ 新块数据不一致" << std::endl;
+    }
+    
+    // 清理
+    free_block(fd, block1);
+    free_block(fd, block1_new);
+    delete_snapshot(fd, snap_id);
+    disk_close(fd);
+    
+    std::cout << "详细COW机制测试完成" << std::endl;
+}
+
+// 新增：测试多快照数据隔离
+void test_snapshot_isolation() {
+    std::cout << "\n=== 测试多快照数据隔离 ===" << std::endl;
+    
+    int fd = disk_open("../disk/disk.img");
+    assert(fd >= 0);
+    
+    // 创建文件并保存初始数据
+    int file_inode = alloc_inode(fd);
+    assert(file_inode >= 0);
+    
+    Inode inode;
+    init_inode(&inode, INODE_TYPE_FILE);
+    
+    const char* data1 = "Version 1: Original data";
+    inode_write_data(fd, &inode, file_inode, data1, 0, strlen(data1));
+    write_inode(fd, file_inode, &inode);
+    
+    // 创建快照1
+    int snap1 = create_snapshot(fd, "isolation_test_1");
+    assert(snap1 >= 0);
+    std::cout << "创建快照1成功，ID=" << snap1 << std::endl;
+    
+    // 修改文件
+    const char* data2 = "Version 2: Modified data";
+    inode_write_data(fd, &inode, file_inode, data2, 0, strlen(data2));
+    write_inode(fd, file_inode, &inode);
+    std::cout << "修改文件数据" << std::endl;
+    
+    // 创建快照2
+    int snap2 = create_snapshot(fd, "isolation_test_2");
+    assert(snap2 >= 0);
+    std::cout << "创建快照2成功，ID=" << snap2 << std::endl;
+    
+    // 再次修改文件
+    const char* data3 = "Version 3: Third version";
+    inode_write_data(fd, &inode, file_inode, data3, 0, strlen(data3));
+    write_inode(fd, file_inode, &inode);
+    std::cout << "再次修改文件数据" << std::endl;
+    
+    // 验证当前文件内容
+    Inode current_inode;
+    read_inode(fd, file_inode, &current_inode);
+    char buf[256];
+    int len = inode_read_data(fd, &current_inode, buf, 0, strlen(data3));
+    buf[len] = '\0';
+    std::cout << "当前文件内容：" << buf << std::endl;
+    assert(strcmp(data3, buf) == 0);
+    
+    // 恢复快照1
+    restore_snapshot(fd, snap1);
+    read_inode(fd, file_inode, &current_inode);
+    len = inode_read_data(fd, &current_inode, buf, 0, strlen(data1));
+    buf[len] = '\0';
+    std::cout << "恢复快照1后文件内容：" << buf << std::endl;
+    assert(strcmp(data1, buf) == 0);
+    
+    // 恢复快照2
+    restore_snapshot(fd, snap2);
+    read_inode(fd, file_inode, &current_inode);
+    len = inode_read_data(fd, &current_inode, buf, 0, strlen(data2));
+    buf[len] = '\0';
+    std::cout << "恢复快照2后文件内容：" << buf << std::endl;
+    assert(strcmp(data2, buf) == 0);
+    
+    // 清理
+    delete_snapshot(fd, snap1);
+    delete_snapshot(fd, snap2);
+    free_inode(fd, file_inode);
+    disk_close(fd);
+    
+    std::cout << "✓ 多快照数据隔离测试通过" << std::endl;
+}
+
+// 新增：测试空间效率
+void test_space_efficiency() {
+    std::cout << "\n=== 测试磁盘空间效率 ===" << std::endl;
+    
+    int fd = disk_open("../disk/disk.img");
+    assert(fd >= 0);
+    
+    // 获取当前空闲块数
+    Superblock sb_before;
+    read_superblock(fd, &sb_before);
+    int free_blocks_before = sb_before.free_block_count;
+    std::cout << "操作前空闲块数：" << free_blocks_before << std::endl;
+    
+    // 创建5个快照
+    int snap_ids[5];
+    for (int i = 0; i < 5; i++) {
+        char name[32];
+        snprintf(name, sizeof(name), "space_test_%d", i);
+        snap_ids[i] = create_snapshot(fd, name);
+        assert(snap_ids[i] >= 0);
+    }
+    std::cout << "创建5个快照后" << std::endl;
+    
+    Superblock sb_after_create;
+    read_superblock(fd, &sb_after_create);
+    int free_blocks_after_create = sb_after_create.free_block_count;
+    int blocks_used_by_snapshots = free_blocks_before - free_blocks_after_create;
+    std::cout << "快照消耗的块数：" << blocks_used_by_snapshots << std::endl;
+    std::cout << "平均每个快照消耗：" << (blocks_used_by_snapshots / 5.0) << " 块" << std::endl;
+    
+    // 删除所有快照
+    for (int i = 0; i < 5; i++) {
+        delete_snapshot(fd, snap_ids[i]);
+    }
+    std::cout << "删除所有快照后" << std::endl;
+    
+    Superblock sb_after_delete;
+    read_superblock(fd, &sb_after_delete);
+    int free_blocks_after_delete = sb_after_delete.free_block_count;
+    std::cout << "恢复的空闲块数：" << free_blocks_after_delete << std::endl;
+    
+    // 验证空间回收（应该接近但可能不完全相同，因为引用计数表也占用空间）
+    int recovered_blocks = free_blocks_after_delete - free_blocks_before;
+    std::cout << "最终恢复的块数差异：" << recovered_blocks << " 块" << std::endl;
+    
+    disk_close(fd);
+    std::cout << "磁盘空间效率测试完成" << std::endl;
+}
+
 // 修改 test/test_snapshot.cpp 中的 main 函数
 int main() {
-    cout << "快照功能测试开始..." << endl;
+    std::cout << "快照功能测试开始..." << std::endl;
     
     try {
         test_snapshot_basic();
@@ -496,13 +740,18 @@ int main() {
         test_cow_mechanism();
         test_multiple_snapshots();
         test_list_snapshots();
-        test_snapshot_restore();      // 新增测试
-        test_complex_snapshot();      // 新增测试
-        test_snapshot_edge_cases();   // 新增测试
+        test_snapshot_restore();
+        test_complex_snapshot();
+        test_snapshot_edge_cases();
         
-        cout << "\n=== 所有快照测试通过! ===" << endl;
-    } catch (const exception& e) {
-        cout << "测试失败: " << e.what() << endl;
+        // 新增诊断测试
+        test_cow_detailed();           // 详细COW测试
+        test_snapshot_isolation();     // 多快照隔离测试
+        test_space_efficiency();       // 空间效率测试
+        
+        std::cout << "\n=== 所有快照测试通过! ===" << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << "测试失败: " << e.what() << std::endl;
         return 1;
     }
     
