@@ -2,9 +2,6 @@
 #include "../include/inode.h"
 #include <cstring>
 
-// 计算每个块能存放多少个块指针
-const int POINTERS_PER_BLOCK = BLOCK_SIZE / sizeof(int);
-
 // 初始化inode
 void init_inode(Inode* inode, int type) {
     inode->type = type;
@@ -109,11 +106,15 @@ int inode_alloc_block(int fd, Inode* inode) {
 }
 
 // 释放inode占用的所有数据块
+// 修正 inode_free_blocks 函数，确保正确处理引用计数
 void inode_free_blocks(int fd, Inode* inode) {
     // 释放直接块
     for (int i = 0; i < inode->block_count && i < DIRECT_BLOCK_COUNT; i++) {
         if (inode->direct_blocks[i] != -1) {
-            free_block(fd, inode->direct_blocks[i]);
+            decrement_block_ref_count(fd, inode->direct_blocks[i]);
+            if (get_block_ref_count(fd, inode->direct_blocks[i]) == 0) {
+                free_block(fd, inode->direct_blocks[i]);
+            }
         }
     }
     
@@ -125,12 +126,18 @@ void inode_free_blocks(int fd, Inode* inode) {
         int indirect_count = inode->block_count - DIRECT_BLOCK_COUNT;
         for (int i = 0; i < indirect_count && i < POINTERS_PER_BLOCK; i++) {
             if (pointers[i] != -1) {
-                free_block(fd, pointers[i]);
+                decrement_block_ref_count(fd, pointers[i]);
+                if (get_block_ref_count(fd, pointers[i]) == 0) {
+                    free_block(fd, pointers[i]);
+                }
             }
         }
         
         // 释放间接块本身
-        free_block(fd, inode->indirect_block);
+        decrement_block_ref_count(fd, inode->indirect_block);
+        if (get_block_ref_count(fd, inode->indirect_block) == 0) {
+            free_block(fd, inode->indirect_block);
+        }
     }
     
     // 重置inode

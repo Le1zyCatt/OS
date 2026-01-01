@@ -6,7 +6,7 @@
 
 // 路径解析函数
 int parse_path(int fd, const char* path, int* inode_ids, int max_depth) {
-    if (!path || path[0] != '/') {
+    if (!path || !inode_ids || max_depth <= 0 || path[0] != '/') {
         return -1; // 路径必须以 '/' 开始
     }
     
