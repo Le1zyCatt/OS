@@ -32,6 +32,10 @@ struct Inode {
     // 可以添加更多字段如权限、时间戳等
 };
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // inode操作函数声明
 void init_inode(Inode* inode, int type);
 int write_inode(int fd, int inode_id, const Inode* inode);
@@ -48,5 +52,9 @@ int dir_add_entry(int fd, Inode* dir_inode, int dir_inode_id, const char* name, 
 int dir_find_entry(int fd, const Inode* dir_inode, const char* name);
 int dir_get_entry(int fd, const Inode* dir_inode, int index, DirEntry* entry);
 int dir_remove_entry(int fd, Inode* dir_inode, int dir_inode_id, const char* name);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

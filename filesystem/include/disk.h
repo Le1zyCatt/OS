@@ -65,6 +65,10 @@ struct BlockBitmapEntry {
     unsigned char ref_count;      // 引用计数 (最多255个引用)
 };
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // 快照操作函数声明
 int create_snapshot(int fd, const char* name);
 int restore_snapshot(int fd, int snapshot_id);
@@ -97,5 +101,9 @@ int decrement_block_ref_count(int fd, int block_id);
 int get_block_ref_count(int fd, int block_id);
 int copy_on_write_block(int fd, int block_id);
 int restore_directory_tree(int fd, int source_inode_id, int target_inode_id);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

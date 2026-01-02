@@ -17,7 +17,7 @@ int disk_open(const char* path) {
     int fd = open(path, O_RDWR | O_CREAT, 0666);
     if (fd < 0) {
         perror("open disk");
-        exit(1);
+        return -1;  // 返回错误而不是退出程序
     }
     
     // 检查文件系统是否已初始化
