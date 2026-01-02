@@ -106,14 +106,21 @@ int dir_remove_entry(int fd, Inode* dir_inode, int dir_inode_id, const char* nam
     if (found_index < entry_count - 1) {
         DirEntry last_entry;
         int last_offset = (entry_count - 1) * sizeof(DirEntry);
-        inode_read_data(fd, dir_inode, (char*)&last_entry, last_offset, sizeof(DirEntry));
+        
+        if (inode_read_data(fd, dir_inode, (char*)&last_entry, last_offset, sizeof(DirEntry)) 
+            != sizeof(DirEntry)) {
+            return -1;  // 读取失败
+        }
         
         int target_offset = found_index * sizeof(DirEntry);
-        inode_write_data(fd, dir_inode, dir_inode_id, (char*)&last_entry, 
-                         target_offset, sizeof(DirEntry));
+        int written = inode_write_data(fd, dir_inode, dir_inode_id, (char*)&last_entry, 
+                                       target_offset, sizeof(DirEntry));
+        if (written != sizeof(DirEntry)) {
+            return -1;  // 写入失败，不修改目录大小
+        }
     }
     
-    // 缩小目录大小
+    // 只有在成功写入后才缩小目录大小
     dir_inode->size -= sizeof(DirEntry);
     
     // 写回inode

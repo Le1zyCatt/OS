@@ -159,86 +159,89 @@ int inode_write_data(int fd, Inode* inode, int inode_id,
                      const char* data, int offset, int size) {
     if (size <= 0) return 0;
     
-    // 第一步：计算需要的块数
-    int blocks_needed = (offset + size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    // 计算写入结束位置和需要的总块数
+    int end_pos = offset + size;
+    int blocks_needed = (end_pos + BLOCK_SIZE - 1) / BLOCK_SIZE;
     
-    // 清理旧数据（如果有）
-    if (inode->block_count > 0) {
-        inode_free_blocks(fd, inode);
-    }
-    
-    // 第二步：分配所有需要的块
-    vector<int> new_blocks;
-    for (int i = 0; i < blocks_needed; i++) {
+    // 如果需要更多块，分配它们
+    while (inode->block_count < blocks_needed) {
         int block_id = alloc_block(fd);
         if (block_id == -1) {
-            // 分配失败，回滚所有已分配的块
-            for (size_t j = 0; j < new_blocks.size(); j++) {
-                free_block(fd, new_blocks[j]);
-            }
-            return -1;
+            return -1; // 分配失败
         }
-        new_blocks.push_back(block_id);
-    }
-    
-    // 第三步：写入数据到各个块
-    int written = 0;
-    for (size_t i = 0; i < new_blocks.size() && written < size; i++) {
-        int write_size = (size - written) > BLOCK_SIZE ? 
-                        BLOCK_SIZE : (size - written);
         
-        // 如果不是首个块，需要零填充
-        if (i == 0 && offset > 0) {
-            char temp_buf[BLOCK_SIZE];
-            memset(temp_buf, 0, BLOCK_SIZE);
-            memcpy(temp_buf + offset, (char*)data, write_size);
-            write_block(fd, new_blocks[i], temp_buf);
+        // 添加到 inode 的块列表
+        if (inode->block_count < DIRECT_BLOCK_COUNT) {
+            inode->direct_blocks[inode->block_count] = block_id;
         } else {
-            write_block(fd, new_blocks[i], (char*)data + written);
-        }
-        
-        written += write_size;
-    }
-    
-    // 第四步：设置inode块指针
-    inode->block_count = blocks_needed;
-    
-    // 设置直接块指针
-    for (int i = 0; i < blocks_needed && i < DIRECT_BLOCK_COUNT; i++) {
-        inode->direct_blocks[i] = new_blocks[i];
-    }
-    
-    // 设置间接块指针
-    if (blocks_needed > DIRECT_BLOCK_COUNT) {
-        // 分配间接块
-        inode->indirect_block = alloc_block(fd);
-        if (inode->indirect_block == -1) {
-            // 分配失败，回滚
-            for (size_t j = 0; j < new_blocks.size(); j++) {
-                free_block(fd, new_blocks[j]);
+            // 需要间接块
+            if (inode->block_count == DIRECT_BLOCK_COUNT) {
+                // 第一次需要间接块，分配它
+                inode->indirect_block = alloc_block(fd);
+                if (inode->indirect_block == -1) {
+                    free_block(fd, block_id);
+                    return -1;
+                }
+                // 初始化间接块
+                int pointers[POINTERS_PER_BLOCK];
+                for (int i = 0; i < POINTERS_PER_BLOCK; i++) {
+                    pointers[i] = -1;
+                }
+                write_block(fd, inode->indirect_block, (void*)pointers);
             }
-            return -1;
+            
+            // 添加到间接块
+            int pointers[POINTERS_PER_BLOCK];
+            read_block(fd, inode->indirect_block, pointers);
+            pointers[inode->block_count - DIRECT_BLOCK_COUNT] = block_id;
+            write_block(fd, inode->indirect_block, (void*)pointers);
         }
         
-        // 写入间接块指针表
-        int pointers[POINTERS_PER_BLOCK];
-        for (int i = 0; i < POINTERS_PER_BLOCK; i++) {
-            pointers[i] = -1;
-        }
-        
-        int indirect_count = blocks_needed - DIRECT_BLOCK_COUNT;
-        for (int i = 0; i < indirect_count; i++) {
-            pointers[i] = new_blocks[DIRECT_BLOCK_COUNT + i];
-        }
-        
-        write_block(fd, inode->indirect_block, (void*)pointers);
+        inode->block_count++;
     }
     
-    // 第五步：更新inode大小和时间戳（原子提交点）
-    inode->size = offset + size;
+    // 写入数据到各个块
+    int written = 0;
+    int current_offset = offset;
+    
+    while (written < size) {
+        int block_index = current_offset / BLOCK_SIZE;
+        int block_offset = current_offset % BLOCK_SIZE;
+        int to_write = std::min(size - written, BLOCK_SIZE - block_offset);
+        
+        // 获取块 ID
+        int block_id;
+        if (block_index < DIRECT_BLOCK_COUNT) {
+            block_id = inode->direct_blocks[block_index];
+        } else {
+            int pointers[POINTERS_PER_BLOCK];
+            read_block(fd, inode->indirect_block, pointers);
+            block_id = pointers[block_index - DIRECT_BLOCK_COUNT];
+        }
+        
+        // 如果不是整块写入，需要先读取再写入
+        if (block_offset != 0 || to_write != BLOCK_SIZE) {
+            char temp_buf[BLOCK_SIZE];
+            read_block(fd, block_id, temp_buf);
+            memcpy(temp_buf + block_offset, data + written, to_write);
+            write_block(fd, block_id, temp_buf);
+        } else {
+            write_block(fd, block_id, (void*)(data + written));
+        }
+        
+        written += to_write;
+        current_offset += to_write;
+    }
+    
+    // 更新文件大小（如果扩大了）
+    if (end_pos > inode->size) {
+        inode->size = end_pos;
+    }
+    
+    // 写回 inode
     write_inode(fd, inode_id, inode);
     
-    return size;
+    return written;
 }
 
 // 从inode读取数据

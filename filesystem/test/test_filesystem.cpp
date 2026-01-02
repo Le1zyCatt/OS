@@ -282,9 +282,15 @@ void test_directory_operations() {
     cout << "测试文件创建成功，inode_id: " << file_inode_id << endl;
     
     // 向根目录添加文件条目
+    cout << "准备添加文件条目，root_inode.size=" << root_inode.size 
+         << ", block_count=" << root_inode.block_count << endl;
     int result = dir_add_entry(fd, &root_inode, root_inode_id, "test.txt", file_inode_id);
+    cout << "dir_add_entry 返回: " << result << endl;
     assert(result == 0);
     cout << "向根目录添加文件条目成功" << endl;
+    
+    // 重新读取 root_inode 以获取最新状态
+    read_inode(fd, root_inode_id, &root_inode);
     
     // 查找刚刚添加的条目
     int found_inode_id = dir_find_entry(fd, &root_inode, "test.txt");
@@ -305,6 +311,9 @@ void test_directory_operations() {
     assert(result == 0);
     cout << "向根目录添加子目录条目成功" << endl;
     
+    // 重新读取 root_inode 以获取最新状态
+    read_inode(fd, root_inode_id, &root_inode);
+    
     // 验证根目录大小
     assert(root_inode.size == 2 * sizeof(DirEntry));
     cout << "根目录大小验证成功: " << root_inode.size << " 字节" << endl;
@@ -319,6 +328,9 @@ void test_directory_operations() {
     assert(result == 0);
     cout << "第二个条目: " << entry.name << " (inode_id: " << entry.inode_id << ")" << endl;
     
+    // 重新读取 root_inode 以获取最新状态
+    read_inode(fd, root_inode_id, &root_inode);
+    
     // 测试重复添加条目（应失败）
     result = dir_add_entry(fd, &root_inode, root_inode_id, "test.txt", file_inode_id);
     assert(result == -1);
@@ -328,6 +340,9 @@ void test_directory_operations() {
     result = dir_remove_entry(fd, &root_inode, root_inode_id, "test.txt");
     assert(result == 0);
     cout << "删除目录条目成功" << endl;
+    
+    // 重新读取 root_inode 以获取最新状态
+    read_inode(fd, root_inode_id, &root_inode);
     
     // 验证删除后的目录大小
     assert(root_inode.size == sizeof(DirEntry));
