@@ -59,12 +59,14 @@ void block_cache_print_stats();
 #include <list>
 #include <unordered_map>
 #include <cstring>
+#include <mutex>
 
 /**
- * BlockCache - LRU 块缓存
+ * BlockCache - LRU 块缓存（线程安全）
  * 
  * 缓存磁盘块的读写操作，减少实际的磁盘 I/O
  * 使用 LRU (Least Recently Used) 策略进行缓存替换
+ * 所有公共方法都是线程安全的
  */
 class BlockCache {
 public:
@@ -156,13 +158,18 @@ private:
     size_t m_misses;        // 缓存未命中次数
     size_t m_replacements;  // 缓存替换次数
     
+    // 线程安全锁
+    mutable std::mutex m_mutex;
+    
     /**
      * 将块移动到链表头部（标记为最近使用）
+     * 注意：调用者必须持有 m_mutex
      */
     void touch(typename std::list<CacheBlock>::iterator it);
     
     /**
      * 淘汰最久未使用的块
+     * 注意：调用者必须持有 m_mutex
      * @param fd 文件描述符
      * @return 是否成功
      */

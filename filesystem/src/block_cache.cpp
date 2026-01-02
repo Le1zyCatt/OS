@@ -58,6 +58,8 @@ bool BlockCache::read_block_cached(int fd, int block_id, void* buf) {
         return true;
     }
     
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
     // 查找缓存
     auto it = m_lookup.find(block_id);
     
@@ -106,10 +108,16 @@ bool BlockCache::read_block_cached(int fd, int block_id, void* buf) {
 
 bool BlockCache::write_block_cached(int fd, int block_id, const void* buf) {
     if (m_capacity == 0) {
-        // 缓存被禁用，直接写入
+        // 缓存被禁用，直接写入磁盘
         write_block(fd, block_id, buf);
         return true;
     }
+    
+    // 必须先获取锁再写入，确保缓存和磁盘的一致性
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    // 写穿策略：同时更新缓存和磁盘
+    write_block(fd, block_id, buf);
     
     // 查找缓存
     auto it = m_lookup.find(block_id);
@@ -121,9 +129,9 @@ bool BlockCache::write_block_cached(int fd, int block_id, const void* buf) {
         // 将块移动到链表头部
         touch(it->second);
         
-        // 更新数据并标记为脏
+        // 更新缓存数据（已写入磁盘，不需要标记为脏）
         memcpy(it->second->data, buf, BLOCK_SIZE);
-        it->second->dirty = true;
+        it->second->dirty = false;
         
         return true;
     }
@@ -144,7 +152,7 @@ bool BlockCache::write_block_cached(int fd, int block_id, const void* buf) {
     auto& new_block = m_items.front();
     new_block.block_id = block_id;
     memcpy(new_block.data, buf, BLOCK_SIZE);
-    new_block.dirty = true;  // 标记为脏
+    new_block.dirty = false;  // 已写入磁盘，不是脏块
     
     // 更新查找表
     m_lookup[block_id] = m_items.begin();
@@ -153,6 +161,8 @@ bool BlockCache::write_block_cached(int fd, int block_id, const void* buf) {
 }
 
 void BlockCache::invalidate(int block_id) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
     auto it = m_lookup.find(block_id);
     if (it == m_lookup.end()) {
         return;
@@ -164,11 +174,15 @@ void BlockCache::invalidate(int block_id) {
 }
 
 void BlockCache::clear() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
     m_items.clear();
     m_lookup.clear();
 }
 
 bool BlockCache::flush_all(int fd) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
     for (auto& block : m_items) {
         if (block.dirty) {
             write_block(fd, block.block_id, block.data);
@@ -179,6 +193,8 @@ bool BlockCache::flush_all(int fd) {
 }
 
 void BlockCache::print_stats() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
     if (m_capacity == 0) {
         std::cout << "📊 Block Cache: DISABLED" << std::endl;
         return;

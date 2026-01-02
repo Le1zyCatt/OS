@@ -3,18 +3,25 @@
 #include <list>
 #include <unordered_map>
 #include <optional>
+#include <mutex>
 
-// 【LRU 缓存模板类】
+// 【LRU 缓存模板类 - 线程安全版本】
 // K: 键类型 (例如: std::string 用于文件路径)
 // V: 值类型 (例如: std::string 用于文件内容)
+// 
+// 线程安全说明：
+// - 所有公共方法都使用内部互斥锁保护
+// - 支持多线程并发访问
+// - 性能：锁粒度为整个缓存，适合中小规模并发
 template<typename K, typename V>
 class LRUCache {
 public:
     // 构造函数：指定缓存容量
     explicit LRUCache(size_t capacity) : m_capacity(capacity) {}
 
-    // 向缓存中放入数据
+    // 向缓存中放入数据（线程安全）
     void put(const K& key, const V& value) {
+        std::lock_guard<std::mutex> lock(m_mutex);
         if (m_capacity == 0) return;
         // 检查 key 是否已存在
         auto it = m_lookup.find(key);
@@ -38,8 +45,9 @@ public:
         m_lookup[key] = m_items.begin();
     }
 
-    // 从缓存中获取数据
+    // 从缓存中获取数据（线程安全）
     V get(const K& key) {
+        std::lock_guard<std::mutex> lock(m_mutex);
         auto it = m_lookup.find(key);
         if (it == m_lookup.end()) {
             // 数据不存在
@@ -55,8 +63,9 @@ public:
         return it->second->second;
     }
 
-    // 推荐：可区分是否命中
+    // 推荐：可区分是否命中（线程安全）
     std::optional<V> tryGet(const K& key) {
+        std::lock_guard<std::mutex> lock(m_mutex);
         auto it = m_lookup.find(key);
         if (it == m_lookup.end()) {
             ++m_misses;
@@ -67,21 +76,35 @@ public:
         return it->second->second;
     }
 
+    // 删除指定键（线程安全）
     void erase(const K& key) {
+        std::lock_guard<std::mutex> lock(m_mutex);
         auto it = m_lookup.find(key);
         if (it == m_lookup.end()) return;
         m_items.erase(it->second);
         m_lookup.erase(it);
     }
 
+    // 清空缓存（线程安全）
     void clear() {
+        std::lock_guard<std::mutex> lock(m_mutex);
         m_items.clear();
         m_lookup.clear();
     }
 
-    size_t hits() const { return m_hits; }
-    size_t misses() const { return m_misses; }
-    size_t size() const { return m_items.size(); }
+    // 获取统计信息（线程安全）
+    size_t hits() const { 
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_hits; 
+    }
+    size_t misses() const { 
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_misses; 
+    }
+    size_t size() const { 
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_items.size(); 
+    }
 
 private:
     size_t m_capacity;
@@ -92,4 +115,7 @@ private:
 
     size_t m_hits = 0;
     size_t m_misses = 0;
+    
+    // 互斥锁：保护所有成员变量的并发访问
+    mutable std::mutex m_mutex;
 };

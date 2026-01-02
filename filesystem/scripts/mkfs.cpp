@@ -23,6 +23,10 @@ int main() {
     sb.inode_count = BLOCK_SIZE * 8;
     sb.free_inode_count = BLOCK_SIZE * 8 - 1;
     sb.free_block_count = BLOCK_COUNT - DATA_BLOCK_START - 1;
+    sb.magic = FS_SUPERBLOCK_MAGIC;
+    sb.version = FS_VERSION;
+    sb.dirent_size = (uint32_t)sizeof(DirEntry);
+    sb.reserved = 0;
 
     // ---- 初始化阶段：直接写块，不用alloc ----
     

@@ -1,5 +1,6 @@
 // inode.cpp
 #include "../include/inode.h"
+#include "../include/block_cache.h"
 #include <cstring>
 #include <vector>
 #include <algorithm>
@@ -30,14 +31,14 @@ int write_inode(int fd, int inode_id, const Inode* inode) {
     
     // 读取对应的块
     char buf[BLOCK_SIZE];
-    read_block(fd, block_id, buf);
+    read_block_cached(fd, block_id, buf);
     
     // 更新inode
     Inode* inodes = (Inode*)buf;
     inodes[offset] = *inode;
     
     // 写回磁盘
-    write_block(fd, block_id, buf);
+    write_block_cached(fd, block_id, buf);
     
     return 0;
 }
@@ -51,7 +52,7 @@ int read_inode(int fd, int inode_id, Inode* inode) {
     
     // 读取对应的块
     char buf[BLOCK_SIZE];
-    read_block(fd, block_id, buf);
+    read_block_cached(fd, block_id, buf);
     
     // 获取inode
     Inode* inodes = (Inode*)buf;
@@ -88,18 +89,18 @@ int inode_alloc_block(int fd, Inode* inode) {
                 pointers[i] = -1;
             }
             pointers[0] = block_id;
-            write_block(fd, inode->indirect_block, pointers);
+            write_block_cached(fd, inode->indirect_block, pointers);
         } else {
             // 读取现有的间接块
             int pointers[POINTERS_PER_BLOCK];
-            read_block(fd, inode->indirect_block, pointers);
+            read_block_cached(fd, inode->indirect_block, pointers);
             
             // 在间接块中找到空闲位置
             int indirect_index = inode->block_count - DIRECT_BLOCK_COUNT;
             pointers[indirect_index] = block_id;
             
             // 写回间接块
-            write_block(fd, inode->indirect_block, pointers);
+            write_block_cached(fd, inode->indirect_block, pointers);
         }
     }
     
@@ -125,7 +126,7 @@ void inode_free_blocks(int fd, Inode* inode) {
     // 释放间接块指向的数据块
     if (inode->indirect_block != -1) {
         int pointers[POINTERS_PER_BLOCK];
-        read_block(fd, inode->indirect_block, pointers);
+        read_block_cached(fd, inode->indirect_block, pointers);
         
         int indirect_count = inode->block_count - DIRECT_BLOCK_COUNT;
         for (int i = 0; i < indirect_count && i < POINTERS_PER_BLOCK; i++) {
@@ -170,6 +171,11 @@ int inode_write_data(int fd, Inode* inode, int inode_id,
             return -1; // 分配失败
         }
         
+        // 清零新分配的块（重要！避免读取垃圾数据）
+        char zero_buf[BLOCK_SIZE];
+        memset(zero_buf, 0, BLOCK_SIZE);
+        write_block_cached(fd, block_id, zero_buf);
+        
         // 添加到 inode 的块列表
         if (inode->block_count < DIRECT_BLOCK_COUNT) {
             inode->direct_blocks[inode->block_count] = block_id;
@@ -187,14 +193,14 @@ int inode_write_data(int fd, Inode* inode, int inode_id,
                 for (int i = 0; i < POINTERS_PER_BLOCK; i++) {
                     pointers[i] = -1;
                 }
-                write_block(fd, inode->indirect_block, (void*)pointers);
+                write_block_cached(fd, inode->indirect_block, (void*)pointers);
             }
             
             // 添加到间接块
             int pointers[POINTERS_PER_BLOCK];
-            read_block(fd, inode->indirect_block, pointers);
+            read_block_cached(fd, inode->indirect_block, pointers);
             pointers[inode->block_count - DIRECT_BLOCK_COUNT] = block_id;
-            write_block(fd, inode->indirect_block, (void*)pointers);
+            write_block_cached(fd, inode->indirect_block, (void*)pointers);
         }
         
         inode->block_count++;
@@ -215,7 +221,7 @@ int inode_write_data(int fd, Inode* inode, int inode_id,
             block_id = inode->direct_blocks[block_index];
         } else {
             int pointers[POINTERS_PER_BLOCK];
-            read_block(fd, inode->indirect_block, pointers);
+            read_block_cached(fd, inode->indirect_block, pointers);
             block_id = pointers[block_index - DIRECT_BLOCK_COUNT];
         }
         
@@ -233,9 +239,9 @@ int inode_write_data(int fd, Inode* inode, int inode_id,
                 inode->direct_blocks[block_index] = new_block_id;
             } else {
                 int pointers[POINTERS_PER_BLOCK];
-                read_block(fd, inode->indirect_block, pointers);
+                read_block_cached(fd, inode->indirect_block, pointers);
                 pointers[block_index - DIRECT_BLOCK_COUNT] = new_block_id;
-                write_block(fd, inode->indirect_block, (void*)pointers);
+                write_block_cached(fd, inode->indirect_block, (void*)pointers);
             }
             
             block_id = new_block_id;
@@ -244,11 +250,11 @@ int inode_write_data(int fd, Inode* inode, int inode_id,
         // 如果不是整块写入，需要先读取再写入
         if (block_offset != 0 || to_write != BLOCK_SIZE) {
             char temp_buf[BLOCK_SIZE];
-            read_block(fd, block_id, temp_buf);
+            read_block_cached(fd, block_id, temp_buf);
             memcpy(temp_buf + block_offset, data + written, to_write);
-            write_block(fd, block_id, temp_buf);
+            write_block_cached(fd, block_id, temp_buf);
         } else {
-            write_block(fd, block_id, (void*)(data + written));
+            write_block_cached(fd, block_id, (void*)(data + written));
         }
         
         written += to_write;
@@ -262,6 +268,9 @@ int inode_write_data(int fd, Inode* inode, int inode_id,
     
     // 写回 inode
     write_inode(fd, inode_id, inode);
+    
+    // 刷新缓存确保数据立即可见（对并发操作很重要）
+    block_cache_flush(fd);
     
     return written;
 }
@@ -301,7 +310,7 @@ int inode_read_data(int fd, const Inode* inode, char* buffer, int offset, int si
             // 处理间接块
             int indirect_index = logical_block_num - DIRECT_BLOCK_COUNT;
             int pointers[POINTERS_PER_BLOCK];
-            read_block(fd, inode->indirect_block, pointers);
+            read_block_cached(fd, inode->indirect_block, pointers);
             physical_block_id = pointers[indirect_index];
         }
         

@@ -324,17 +324,28 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             response = "ERROR: " + errorMsg;
         }
     } else if (cmd == "PAPER_UPLOAD") {
+        std::cout << "[CLIProtocol] PAPER_UPLOAD command received" << std::endl;
         std::string sessionId, paperId, content;
         ss >> sessionId >> paperId;
         std::getline(ss, content);
         if (!content.empty() && content[0] == ' ') content = content.substr(1);
+        
+        std::cout << "[CLIProtocol] Parsed - sessionId: " << sessionId.substr(0, 20) << "..." << std::endl;
+        std::cout << "[CLIProtocol] Parsed - paperId: " << paperId << std::endl;
+        std::cout << "[CLIProtocol] Parsed - content length: " << content.length() << " bytes" << std::endl;
+        
         if (sessionId.empty() || paperId.empty()) {
+            std::cout << "[CLIProtocol] ❌ Missing parameters" << std::endl;
             response = "ERROR: Usage: PAPER_UPLOAD <sessionToken> <paperId> <content>";
             return false;
         }
+        
+        std::cout << "[CLIProtocol] Calling m_paper->uploadPaper()..." << std::endl;
         if (m_paper->uploadPaper(sessionId, paperId, content, errorMsg)) {
+            std::cout << "[CLIProtocol] ✓ Upload successful" << std::endl;
             response = "OK: Paper uploaded.";
         } else {
+            std::cout << "[CLIProtocol] ❌ Upload failed: " << errorMsg << std::endl;
             response = "ERROR: " + errorMsg;
         }
     } else if (cmd == "PAPER_REVISE") {

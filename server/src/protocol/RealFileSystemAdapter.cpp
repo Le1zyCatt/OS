@@ -21,8 +21,10 @@ RealFileSystemAdapter::RealFileSystemAdapter(const std::string& diskPath) {
         throw std::runtime_error("Failed to open disk image: " + diskPath);
     }
     
-    // 初始化块缓存（容量为 128 个块，约 128KB）
-    block_cache_init(128);
+    // 禁用块缓存以确保多线程环境下的数据一致性
+    // 底层文件系统代码直接使用 read_block/write_block，绕过缓存
+    // 在多线程环境下，缓存和磁盘数据可能不一致
+    block_cache_init(0);  // 容量为 0 表示禁用缓存
     
     std::cout << "✅ Filesystem adapter initialized with disk: " << diskPath << std::endl;
 }
@@ -105,30 +107,38 @@ bool RealFileSystemAdapter::ensureDirectoryExists(const std::string& path, std::
 bool RealFileSystemAdapter::ensureDirectoryExistsInternal(const std::string& path, std::string& errorMsg) {
     std::string normPath = normalizePath(path);
     
+    std::cout << "[ensureDir] Ensuring " << normPath << " exists" << std::endl;
+    
     // 根目录总是存在
     if (normPath == "/") {
+        std::cout << "[ensureDir] Root directory, returning true" << std::endl;
         return true;
     }
     
     // 检查目录是否已存在
     int inodeId = get_inode_by_path(m_fd, normPath.c_str());
+    std::cout << "[ensureDir] get_inode_by_path returned: " << inodeId << std::endl;
     if (inodeId >= 0) {
         // 目录已存在，检查是否真的是目录
         Inode inode;
         if (read_inode(m_fd, inodeId, &inode) < 0) {
             errorMsg = "Failed to read inode for: " + normPath;
+            std::cout << "[ensureDir] ❌ Failed to read inode" << std::endl;
             return false;
         }
         
         if (inode.type != INODE_TYPE_DIR) {
             errorMsg = "Path exists but is not a directory: " + normPath;
+            std::cout << "[ensureDir] ❌ Path exists but not a directory" << std::endl;
             return false;
         }
         
+        std::cout << "[ensureDir] ✓ Directory already exists" << std::endl;
         return true;  // 目录已存在
     }
     
     // 目录不存在，需要创建
+    std::cout << "[ensureDir] Directory does not exist, need to create" << std::endl;
     // 首先确保父目录存在
     size_t lastSlash = normPath.find_last_of('/');
     if (lastSlash == std::string::npos) {
@@ -137,11 +147,14 @@ bool RealFileSystemAdapter::ensureDirectoryExistsInternal(const std::string& pat
     }
     
     std::string parentPath = (lastSlash == 0) ? "/" : normPath.substr(0, lastSlash);
+    std::cout << "[ensureDir] Recursively ensuring parent: " << parentPath << std::endl;
     if (!ensureDirectoryExistsInternal(parentPath, errorMsg)) {
+        std::cout << "[ensureDir] ❌ Failed to ensure parent: " << errorMsg << std::endl;
         return false;
     }
     
     // 创建当前目录（使用内部函数，避免重复加锁）
+    std::cout << "[ensureDir] Creating directory: " << normPath << std::endl;
     return createDirectoryInternal(normPath, errorMsg);
 }
 
@@ -280,22 +293,26 @@ bool RealFileSystemAdapter::writeFile(const std::string& path, const std::string
     
     std::string normPath = normalizePath(path);
     
-    // 获取父目录和文件名
-    int parentInodeId;
-    std::string fileName;
-    if (!getParentAndName(normPath, parentInodeId, fileName, errorMsg)) {
+    // 首先确保父目录存在（使用内部函数，避免重复加锁）
+    size_t lastSlash = normPath.find_last_of('/');
+    if (lastSlash == std::string::npos || lastSlash == 0) {
+        // 路径在根目录下
+        lastSlash = (lastSlash == std::string::npos) ? 0 : lastSlash;
+    }
+    std::string parentPath = (lastSlash == 0) ? "/" : normPath.substr(0, lastSlash);
+    std::string fileName = normPath.substr(lastSlash + 1);
+    
+    if (fileName.empty()) {
+        errorMsg = "Invalid file path: no filename";
         return false;
     }
     
-    // 确保父目录存在（使用内部函数，避免重复加锁）
-    size_t lastSlash = normPath.find_last_of('/');
-    std::string parentPath = (lastSlash == 0) ? "/" : normPath.substr(0, lastSlash);
     if (!ensureDirectoryExistsInternal(parentPath, errorMsg)) {
         return false;
     }
     
-    // 重新获取父目录 inode（因为可能刚创建）
-    parentInodeId = pathToInodeId(parentPath, errorMsg);
+    // 获取父目录 inode（目录现在一定存在）
+    int parentInodeId = pathToInodeId(parentPath, errorMsg);
     if (parentInodeId < 0) {
         return false;
     }
@@ -322,9 +339,16 @@ bool RealFileSystemAdapter::writeFile(const std::string& path, const std::string
         init_inode(&fileInode, INODE_TYPE_FILE);
         
         // 添加目录条目
-        if (dir_add_entry(m_fd, &parentInode, parentInodeId, fileName.c_str(), fileInodeId) < 0) {
+        int addResult = dir_add_entry(m_fd, &parentInode, parentInodeId, fileName.c_str(), fileInodeId);
+        if (addResult < 0) {
             free_inode(m_fd, fileInodeId);
-            errorMsg = "Failed to add directory entry";
+            if (addResult == -2) {
+                errorMsg = "File entry already exists: " + fileName;
+            } else if (addResult == -3) {
+                errorMsg = "Failed to write directory entry (disk may be full)";
+            } else {
+                errorMsg = "Failed to add directory entry";
+            }
             return false;
         }
     } else {
@@ -442,25 +466,36 @@ bool RealFileSystemAdapter::createDirectoryInternal(const std::string& path, std
     int existingInodeId = get_inode_by_path(m_fd, normPath.c_str());
     if (existingInodeId >= 0) {
         // 目录已存在，这不是错误（幂等操作）
+        std::cout << "[createDir] " << normPath << " already exists (inode " << existingInodeId << ")" << std::endl;
         return true;
     }
     
-    // 确保父目录存在（递归创建）
+    // 解析路径：获取父目录路径和目录名
     size_t lastSlash = normPath.find_last_of('/');
-    if (lastSlash != std::string::npos && lastSlash > 0) {
-        std::string parentPath = normPath.substr(0, lastSlash);
-        // 递归确保父目录存在
-        if (!ensureDirectoryExistsInternal(parentPath, errorMsg)) {
-            return false;
-        }
-    }
+    std::string parentPath = (lastSlash == 0) ? "/" : normPath.substr(0, lastSlash);
+    std::string dirName = normPath.substr(lastSlash + 1);
     
-    // 获取父目录和目录名
-    int parentInodeId;
-    std::string dirName;
-    if (!getParentAndName(normPath, parentInodeId, dirName, errorMsg)) {
+    if (dirName.empty()) {
+        errorMsg = "Invalid directory path: no directory name";
         return false;
     }
+    
+    std::cout << "[createDir] Creating " << normPath << " (parent=" << parentPath << ", name=" << dirName << ")" << std::endl;
+    
+    // 确保父目录存在（递归创建）
+    if (!ensureDirectoryExistsInternal(parentPath, errorMsg)) {
+        std::cout << "[createDir] Failed to ensure parent exists: " << errorMsg << std::endl;
+        return false;
+    }
+    
+    // 获取父目录 inode（父目录现在一定存在）
+    int parentInodeId = pathToInodeId(parentPath, errorMsg);
+    if (parentInodeId < 0) {
+        std::cout << "[createDir] Parent not found after ensureExists: " << parentPath << std::endl;
+        return false;
+    }
+    
+    std::cout << "[createDir] Parent inode id: " << parentInodeId << std::endl;
     
     // 读取父目录 inode
     Inode parentInode;
@@ -470,23 +505,54 @@ bool RealFileSystemAdapter::createDirectoryInternal(const std::string& path, std
     }
     
     // 分配新的 inode
+    std::cout << "[createDir] Allocating inode for " << dirName << std::endl;
     int newDirInodeId = alloc_inode(m_fd);
     if (newDirInodeId < 0) {
         errorMsg = "Failed to allocate inode for new directory";
+        std::cout << "[createDir] ❌ Failed to allocate inode" << std::endl;
         return false;
     }
+    std::cout << "[createDir] ✓ Allocated inode " << newDirInodeId << std::endl;
     
     // 初始化目录 inode
     Inode newDirInode;
     init_inode(&newDirInode, INODE_TYPE_DIR);
     write_inode(m_fd, newDirInodeId, &newDirInode);
+    std::cout << "[createDir] ✓ Initialized and wrote inode" << std::endl;
     
     // 添加到父目录
-    if (dir_add_entry(m_fd, &parentInode, parentInodeId, dirName.c_str(), newDirInodeId) < 0) {
+    std::cout << "[createDir] Adding entry '" << dirName << "' to parent inode " << parentInodeId << std::endl;
+    int addResult = dir_add_entry(m_fd, &parentInode, parentInodeId, dirName.c_str(), newDirInodeId);
+    std::cout << "[createDir] dir_add_entry result: " << addResult << " for " << dirName << std::endl;
+    if (addResult < 0) {
         free_inode(m_fd, newDirInodeId);
-        errorMsg = "Failed to add directory entry";
+        if (addResult == -2) {
+            // 同名条目已存在，检查是否是目录（可能是并发创建）
+            // 重新读取父目录 inode 以获取最新状态
+            read_inode(m_fd, parentInodeId, &parentInode);
+            int existingId = dir_find_entry(m_fd, &parentInode, dirName.c_str());
+            std::cout << "[createDir] Entry already exists, existingId: " << existingId << std::endl;
+            if (existingId >= 0) {
+                Inode existingInode;
+                if (read_inode(m_fd, existingId, &existingInode) == 0 && 
+                    existingInode.type == INODE_TYPE_DIR) {
+                    // 目录已存在，这是幂等操作，返回成功
+                    std::cout << "[createDir] Concurrent creation detected, returning success" << std::endl;
+                    return true;
+                }
+            }
+            errorMsg = "Directory entry already exists: " + dirName;
+        } else if (addResult == -3) {
+            errorMsg = "Failed to write directory entry (disk may be full)";
+        } else {
+            errorMsg = "Failed to add directory entry";
+        }
         return false;
     }
+    
+    // 验证目录已创建
+    int verifyId = get_inode_by_path(m_fd, normPath.c_str());
+    std::cout << "[createDir] Verification: " << normPath << " inode=" << verifyId << std::endl;
     
     return true;
 }

@@ -188,7 +188,7 @@ public:
         : m_inner(std::move(inner)), m_cache(capacity), m_capacity(capacity) {}
 
     CacheStats cacheStats() const override {
-        std::scoped_lock lock(m_cacheMutex);
+        // LRUCache 内部已加锁，无需外部锁
         return CacheStats{
             m_cache.hits(),
             m_cache.misses(),
@@ -198,7 +198,7 @@ public:
     }
 
     void clearCache() override {
-        std::scoped_lock lock(m_cacheMutex);
+        // LRUCache 内部已加锁，无需外部锁
         m_cache.clear();
     }
 
@@ -208,10 +208,8 @@ public:
 
     bool restoreSnapshot(const std::string& snapshotName, std::string& errorMsg) override {
         // 恢复会大规模改变内容：直接清空缓存
-        {
-            std::scoped_lock lock(m_cacheMutex);
-            m_cache.clear();
-        }
+        // LRUCache 内部已加锁，无需外部锁
+        m_cache.clear();
         return m_inner->restoreSnapshot(snapshotName, errorMsg);
     }
 
@@ -222,41 +220,33 @@ public:
     bool readFile(const std::string& path, std::string& content, std::string& errorMsg) override {
         const std::string key = normalizePath(path);
 
-        {
-            std::scoped_lock lock(m_cacheMutex);
-            if (auto v = m_cache.tryGet(key)) {
-                content = *v;
-                return true;
-            }
+        // LRUCache 内部已加锁，无需外部锁
+        if (auto v = m_cache.tryGet(key)) {
+            content = *v;
+            return true;
         }
 
         if (!m_inner->readFile(key, content, errorMsg)) {
             return false;
         }
 
-        {
-            std::scoped_lock lock(m_cacheMutex);
-            m_cache.put(key, content);
-        }
+        // LRUCache 内部已加锁，无需外部锁
+        m_cache.put(key, content);
         return true;
     }
 
     bool writeFile(const std::string& path, const std::string& content, std::string& errorMsg) override {
         const std::string key = normalizePath(path);
         if (!m_inner->writeFile(key, content, errorMsg)) return false;
-        {
-            std::scoped_lock lock(m_cacheMutex);
-            m_cache.put(key, content);
-        }
+        // LRUCache 内部已加锁，无需外部锁
+        m_cache.put(key, content);
         return true;
     }
 
     bool deleteFile(const std::string& path, std::string& errorMsg) override {
         const std::string key = normalizePath(path);
-        {
-            std::scoped_lock lock(m_cacheMutex);
-            m_cache.erase(key);
-        }
+        // LRUCache 内部已加锁，无需外部锁
+        m_cache.erase(key);
         return m_inner->deleteFile(key, errorMsg);
     }
 
@@ -275,9 +265,9 @@ public:
 
 private:
     std::unique_ptr<FSProtocol> m_inner;
-    LRUCache<std::string, std::string> m_cache;
+    LRUCache<std::string, std::string> m_cache;  // 线程安全的LRU缓存
     size_t m_capacity;
-    mutable std::mutex m_cacheMutex;
+    // 注意：m_cacheMutex 已移除，因为 LRUCache 内部已实现线程安全
 };
 
 // 引入真实文件系统适配器

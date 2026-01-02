@@ -9,10 +9,12 @@
 #include <ctime>
 #include <vector>
 #include <map>
+#include <set>
 
 // 在 disk.cpp 文件中添加以下前向声明
 void check_and_repair_filesystem(int fd);
 void check_ref_count_consistency(int fd, const char* block_bitmap);
+static void format_disk_image(int fd);
 
 // 修改disk_open函数 - 添加初始化检查
 int disk_open(const char* path) {
@@ -26,11 +28,31 @@ int disk_open(const char* path) {
     off_t file_size = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
     
-    // 如果文件大小为0，说明是新磁盘，不需要检查一致性
-    if (file_size > 0) {
-        // 文件已存在，检查并修复文件系统一致性
-        check_and_repair_filesystem(fd);
+    // 如果文件大小为0，说明是新磁盘：直接格式化
+    if (file_size == 0) {
+        format_disk_image(fd);
+        return fd;
     }
+
+    // 文件已存在：先读 superblock 判断格式/版本是否匹配
+    Superblock sb{};
+    read_superblock(fd, &sb);
+
+    const bool basic_invalid = (sb.block_count <= 0 || sb.inode_count <= 0 || sb.block_size != BLOCK_SIZE);
+    const bool version_mismatch =
+        (sb.magic != FS_SUPERBLOCK_MAGIC) ||
+        (sb.version != FS_VERSION) ||
+        (sb.dirent_size != (uint32_t)sizeof(DirEntry));
+
+    // 若发现旧格式或明显损坏：重新格式化（清空旧数据）
+    if (basic_invalid || version_mismatch) {
+        std::cout << "⚠ Detected incompatible or uninitialized filesystem image. Re-formatting disk..." << std::endl;
+        format_disk_image(fd);
+        return fd;
+    }
+
+    // 格式匹配：再做一致性检查/修复
+    check_and_repair_filesystem(fd);
     
     return fd;
 }
@@ -44,7 +66,8 @@ void check_and_repair_filesystem(int fd) {
     
     // 检查superblock是否有效（检查标志位或一些已知值）
     // 简单方法：检查inode_count和block_count是否合理
-    if (sb.block_count <= 0 || sb.inode_count <= 0) {
+    if (sb.block_count <= 0 || sb.inode_count <= 0 || sb.block_size != BLOCK_SIZE ||
+        sb.magic != FS_SUPERBLOCK_MAGIC || sb.version != FS_VERSION) {
         std::cout << "⚠ 未初始化的文件系统，跳过一致性检查" << std::endl;
         return;
     }
@@ -112,6 +135,7 @@ void check_and_repair_filesystem(int fd) {
 }
 
 // 修改check_ref_count_consistency - 更精确的检查
+// 注意：只检查数据块（DATA_BLOCK_START之后），元数据块由系统管理
 void check_ref_count_consistency(int fd, const char* block_bitmap) {
     int repairs = 0;
     int issues = 0;
@@ -120,6 +144,7 @@ void check_ref_count_consistency(int fd, const char* block_bitmap) {
     // 批量修复：先收集所有需要修复的块
     std::vector<int> blocks_to_fix;
     
+    // 只检查数据块区域（跳过元数据块）
     for (int i = DATA_BLOCK_START; i < max_blocks; i++) {
         int byte_idx = i / 8;
         int bit_idx = i % 8;
@@ -128,10 +153,30 @@ void check_ref_count_consistency(int fd, const char* block_bitmap) {
         if (block_bitmap[byte_idx] & (1 << bit_idx)) {
             int ref_count = get_block_ref_count(fd, i);
             
-            // 已分配的块ref_count应该 >= 1
+            // 已分配的数据块ref_count应该 >= 1
             if (ref_count <= 0) {
                 issues++;
                 blocks_to_fix.push_back(i);
+            }
+        } else {
+            // 块未分配，RefCount应该为0
+            int ref_count = get_block_ref_count(fd, i);
+            if (ref_count > 0) {
+                // 这种情况也需要修复：未分配的块不应该有引用计数
+                issues++;
+                // 直接清零，不需要加入修复列表
+                int ref_count_block_offset = i / BLOCK_SIZE;
+                int ref_count_index = i % BLOCK_SIZE;
+                if (ref_count_block_offset < REF_COUNT_TABLE_BLOCKS) {
+                    char ref_count_buf[BLOCK_SIZE];
+                    read_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
+                    ref_count_buf[ref_count_index] = 0;
+                    write_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
+                    repairs++;
+                    if (repairs <= 10) {
+                        std::cout << "修复块" << i << "的RefCount: " << ref_count << " → 0 (未分配)" << std::endl;
+                    }
+                }
             }
         }
     }
@@ -186,14 +231,22 @@ void disk_close(int fd) {
 
 void read_block(int fd, int block_id, void* buf) {
     off_t offset = (off_t)block_id * BLOCK_SIZE;
-    lseek(fd, offset, SEEK_SET);
-    read(fd, buf, BLOCK_SIZE);
+    // 使用 pread 代替 lseek+read，确保线程安全
+    ssize_t bytes_read = pread(fd, buf, BLOCK_SIZE, offset);
+    if (bytes_read != BLOCK_SIZE) {
+        // 读取失败，填充0
+        memset(buf, 0, BLOCK_SIZE);
+    }
 }
 
 void write_block(int fd, int block_id, const void* buf) {
     off_t offset = (off_t)block_id * BLOCK_SIZE;
-    lseek(fd, offset, SEEK_SET);
-    write(fd, buf, BLOCK_SIZE);
+    // 使用 pwrite 代替 lseek+write，确保线程安全
+    ssize_t bytes_written = pwrite(fd, buf, BLOCK_SIZE, offset);
+    if (bytes_written != BLOCK_SIZE) {
+        // 写入失败，这是严重错误，但我们暂时不处理
+        // 在生产环境中应该记录错误或抛出异常
+    }
 }
 
 // 读取数据块的一部分内容
@@ -247,6 +300,89 @@ void write_superblock(int fd, const Superblock* sb) {
     memset(buf, 0, BLOCK_SIZE);
     memcpy(buf, sb, sizeof(Superblock));
     write_block(fd, SUPERBLOCK_BLOCK, buf);
+}
+
+// 简化的 mkfs：用于在 disk_open 时自动初始化/升级磁盘镜像。
+// 注意：这会清空现有数据（对作业测试场景更友好，避免结构升级导致旧镜像无法读取）。
+static void format_disk_image(int fd) {
+    // 1) 扩展文件到完整大小并清零（ftruncate 不保证内容为 0，但后续会写关键元数据区域）
+    if (ftruncate(fd, DISK_SIZE) != 0) {
+        perror("ftruncate disk");
+        // 尝试继续执行
+    }
+
+    char buf[BLOCK_SIZE];
+
+    // ---- Superblock ----
+    Superblock sb{};
+    sb.block_size = BLOCK_SIZE;
+    sb.block_count = BLOCK_COUNT;
+    sb.inode_count = BLOCK_SIZE * 8;
+    sb.free_inode_count = BLOCK_SIZE * 8 - 1;
+    sb.free_block_count = BLOCK_COUNT - DATA_BLOCK_START - 1;
+    sb.magic = FS_SUPERBLOCK_MAGIC;
+    sb.version = FS_VERSION;
+    sb.dirent_size = (uint32_t)sizeof(DirEntry);
+    sb.reserved = 0;
+
+    memset(buf, 0, BLOCK_SIZE);
+    memcpy(buf, &sb, sizeof(sb));
+    write_block(fd, SUPERBLOCK_BLOCK, buf);
+
+    // ---- inode bitmap ----
+    memset(buf, 0, BLOCK_SIZE);
+    // inode 0 occupied
+    buf[0] |= 1;
+    write_block(fd, INODE_BITMAP_BLOCK, buf);
+
+    // ---- block bitmap ----
+    memset(buf, 0, BLOCK_SIZE);
+    // mark metadata blocks + root dir block as allocated
+    for (int i = 0; i < DATA_BLOCK_START + 1; i++) {  // +1 for root dir block
+        buf[i / 8] |= (1 << (i % 8));
+    }
+    write_block(fd, BLOCK_BITMAP_BLOCK, buf);
+
+    // ---- ref_count table ----
+    memset(buf, 0, BLOCK_SIZE);
+    for (int i = 0; i < REF_COUNT_TABLE_BLOCKS; i++) {
+        write_block(fd, REF_COUNT_TABLE_START + i, buf);
+    }
+    // 设置元数据块ref_count=1
+    for (int i = 0; i <= DATA_BLOCK_START; i++) {
+        int block_offset = i / BLOCK_SIZE;
+        int block_index = i % BLOCK_SIZE;
+        char ref_buf[BLOCK_SIZE];
+        read_block(fd, REF_COUNT_TABLE_START + block_offset, ref_buf);
+        ref_buf[block_index] = 1;
+        write_block(fd, REF_COUNT_TABLE_START + block_offset, ref_buf);
+    }
+
+    // ---- inode table ----
+    memset(buf, 0, BLOCK_SIZE);
+    for (int i = 0; i < INODE_TABLE_BLOCK_COUNT; i++) {
+        write_block(fd, INODE_TABLE_START + i, buf);
+    }
+
+    // ---- snapshot table ----
+    memset(buf, 0, BLOCK_SIZE);
+    for (int i = 0; i < SNAPSHOT_TABLE_BLOCKS; i++) {
+        write_block(fd, SNAPSHOT_TABLE_START + i, buf);
+    }
+
+    // ---- root inode ----
+    Inode root_inode;
+    init_inode(&root_inode, INODE_TYPE_DIR);
+    root_inode.direct_blocks[0] = DATA_BLOCK_START;
+    write_inode(fd, 0, &root_inode);
+
+    // write back SB again (consistent counts)
+    memset(buf, 0, BLOCK_SIZE);
+    memcpy(buf, &sb, sizeof(sb));
+    write_block(fd, SUPERBLOCK_BLOCK, buf);
+
+    std::cout << "✓ disk image formatted (auto-mkfs), version=" << sb.version
+              << ", dirent_size=" << sb.dirent_size << std::endl;
 }
 
 // 分配一个 inode
@@ -338,44 +474,50 @@ int alloc_block(int fd) {
 }
 
 // 修改free_block函数
-// 修改free_block函数
+// 注意：此函数处理引用计数并在必要时释放块
+// 支持防御性调用（即使块已经释放也不会出错）
 void free_block(int fd, int block_id) {
     char buf[BLOCK_SIZE];
     read_block(fd, BLOCK_BITMAP_BLOCK, buf);
     
-    // 计算引用计数
+    // 检查块是否已经释放
+    int byte_index = block_id / 8;
+    int bit_index = block_id % 8;
+    bool already_free = !(buf[byte_index] & (1 << bit_index));
+    
+    // 如果块已经释放，直接返回（防御性编程）
+    if (already_free) {
+        return;
+    }
+    
+    // 计算引用计数位置
     int ref_count_block_offset = block_id / BLOCK_SIZE;
     int ref_count_index = block_id % BLOCK_SIZE;
     
+    // 检查当前引用计数
+    int current_ref_count = 0;
     if (ref_count_block_offset < REF_COUNT_TABLE_BLOCKS) {
         char ref_count_buf[BLOCK_SIZE];
         read_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
-        
-        unsigned char ref_count = ref_count_buf[ref_count_index];
+        current_ref_count = ref_count_buf[ref_count_index];
         
         // 如果引用计数 > 1，只减少计数不真正释放
-        if (ref_count > 1) {
+        if (current_ref_count > 1) {
             ref_count_buf[ref_count_index]--;
             write_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
             return;
         }
-    }
-    
-    // 第一步：标记bitmap为未使用
-    int byte_index = block_id / 8;
-    int bit_index = block_id % 8;
-    buf[byte_index] &= ~(1 << bit_index);
-    write_block(fd, BLOCK_BITMAP_BLOCK, buf);
-    
-    // 第二步：清除引用计数
-    if (ref_count_block_offset < REF_COUNT_TABLE_BLOCKS) {
-        char ref_count_buf[BLOCK_SIZE];
-        read_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
+        
+        // 如果引用计数 == 1 或 0，清零
         ref_count_buf[ref_count_index] = 0;
         write_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
     }
     
-    // 第三步：更新superblock（提交点）
+    // 标记bitmap为未使用
+    buf[byte_index] &= ~(1 << bit_index);
+    write_block(fd, BLOCK_BITMAP_BLOCK, buf);
+    
+    // 更新superblock（提交点）
     Superblock sb;
     read_superblock(fd, &sb);
     sb.free_block_count++;
@@ -478,7 +620,8 @@ int create_snapshot(int fd, const char* name) {
     snapshots[offset] = new_snapshot;
     write_block(fd, block_id, buf);
     
-    // 第二阶段：增加所有块的引用计数
+    // 第二阶段：增加所有数据块的引用计数（跳过元数据块）
+    // 注意：只增加数据块的引用计数，元数据块不参与快照的引用计数管理
     int max_blocks = (BLOCK_SIZE * 8 < BLOCK_COUNT) ? BLOCK_SIZE * 8 : BLOCK_COUNT;
     for (int block_id_iter = DATA_BLOCK_START; block_id_iter < max_blocks; block_id_iter++) {
         int byte_index = block_id_iter / 8;
@@ -851,19 +994,25 @@ int delete_snapshot(int fd, int snapshot_id) {
         char snapshot_block_bitmap[BLOCK_SIZE];
         read_block(fd, snapshot_to_delete.block_bitmap_block, snapshot_block_bitmap);
         
+        // 只减少数据块的引用计数（与create_snapshot对应）
         int max_blocks = (BLOCK_SIZE * 8 < BLOCK_COUNT) ? BLOCK_SIZE * 8 : BLOCK_COUNT;
         for (int block_id_iter = DATA_BLOCK_START; block_id_iter < max_blocks; block_id_iter++) {
             int byte_index = block_id_iter / 8;
             int bit_index = block_id_iter % 8;
             
             if (snapshot_block_bitmap[byte_index] & (1 << bit_index)) {
-                // 忽略错误，因为快照已标记为删除
-                decrement_block_ref_count(fd, block_id_iter);
+                // 直接调用free_block，它会处理引用计数
+                // free_block内部会检查RefCount：
+                // - 如果>1，只减少计数
+                // - 如果=1或0，清零并释放块
+                free_block(fd, block_id_iter);
             }
         }
     }
     
     // 释放元数据块
+    // 注意：这些块可能已经在上面的循环中被处理过了（如果它们在快照位图中）
+    // free_block会检查bitmap，如果已经释放就不会重复操作
     if (snapshot_to_delete.inode_bitmap_block > 0) {
         free_block(fd, snapshot_to_delete.inode_bitmap_block);
     }

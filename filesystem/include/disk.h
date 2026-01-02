@@ -28,12 +28,24 @@ const int REF_COUNT_TABLE_BLOCKS = 100;  // 每个块能存100个块的ref_count
 const int DATA_BLOCK_START = REF_COUNT_TABLE_START + REF_COUNT_TABLE_BLOCKS;
 
 // 先定义 Superblock 结构体
+// 说明：
+// - 早期版本没有 magic/version 字段；升级后用它来检测磁盘格式是否与当前代码匹配。
+// - 若检测到旧格式（magic 不匹配），disk_open 会自动重新格式化磁盘镜像（数据会被清空）。
+static const uint32_t FS_SUPERBLOCK_MAGIC = 0x4F534653; // 'OSFS'
+static const uint32_t FS_VERSION = 2;
+
 struct Superblock {
     int block_size;
     int block_count;
     int inode_count;
     int free_inode_count;
     int free_block_count;
+
+    // v2+ fields
+    uint32_t magic;
+    uint32_t version;
+    uint32_t dirent_size;
+    uint32_t reserved; // 保留，便于未来扩展（对齐到 16 字节）
 };
 
 // 再定义 Snapshot 结构体

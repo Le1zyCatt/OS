@@ -57,6 +57,7 @@ public:
                     || requiredPermission == Permission::MKDIR
                     || requiredPermission == Permission::PAPER_UPLOAD
                     || requiredPermission == Permission::PAPER_REVISE
+                    || requiredPermission == Permission::PAPER_DOWNLOAD
                     || requiredPermission == Permission::PAPER_STATUS
                     || requiredPermission == Permission::REVIEW_DOWNLOAD;
             // 访客只拥有读权限（如果你们希望“未登录不可读”，可在 CLIProtocol 直接禁止）

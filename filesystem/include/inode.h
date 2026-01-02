@@ -14,7 +14,9 @@ const int INODE_TYPE_DIR = 2;
 const int DIRECT_BLOCK_COUNT = 10;
 
 // 目录项结构
-const int DIR_NAME_SIZE = 28;
+// 注意：目录项名长度需要覆盖上层业务的 paperId（例如 concurrent_paper_*_timestamp）。
+// 这里让 DirEntry 尺寸保持 64 字节对齐：4 (inode_id) + 60 (name) = 64。
+const int DIR_NAME_SIZE = 60;
 struct DirEntry {
     int inode_id;                      // inode编号
     char name[DIR_NAME_SIZE];          // 文件或目录名

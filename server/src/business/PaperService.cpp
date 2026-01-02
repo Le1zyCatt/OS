@@ -150,9 +150,32 @@ bool PaperService::uploadPaper(const std::string& sessionToken,
 
     std::cout << "[PaperService] Creating directory structure..." << std::endl;
     // 创建目录结构
-    fsProtocol_->createDirectory(paperRoot(paperId), errorMsg);
-    fsProtocol_->createDirectory(reviewsDir(paperId), errorMsg);
-    fsProtocol_->createDirectory(revisionsDir(paperId), errorMsg);
+    const std::string rootPath = paperRoot(paperId);
+    std::cout << "[PaperService] Creating paperRoot: " << rootPath << std::endl;
+    if (!fsProtocol_->createDirectory(rootPath, errorMsg)) {
+        std::cout << "[PaperService] ❌ Failed to create paperRoot: " << rootPath << std::endl;
+        std::cout << "[PaperService] Error message: " << errorMsg << std::endl;
+        return false;
+    }
+    std::cout << "[PaperService] ✓ paperRoot created successfully" << std::endl;
+    
+    const std::string revDir = reviewsDir(paperId);
+    std::cout << "[PaperService] Creating reviewsDir: " << revDir << std::endl;
+    if (!fsProtocol_->createDirectory(revDir, errorMsg)) {
+        std::cout << "[PaperService] ❌ Failed to create reviewsDir: " << revDir << std::endl;
+        std::cout << "[PaperService] Error message: " << errorMsg << std::endl;
+        return false;
+    }
+    std::cout << "[PaperService] ✓ reviewsDir created successfully" << std::endl;
+    
+    const std::string revsDir = revisionsDir(paperId);
+    std::cout << "[PaperService] Creating revisionsDir: " << revsDir << std::endl;
+    if (!fsProtocol_->createDirectory(revsDir, errorMsg)) {
+        std::cout << "[PaperService] ❌ Failed to create revisionsDir: " << revsDir << std::endl;
+        std::cout << "[PaperService] Error message: " << errorMsg << std::endl;
+        return false;
+    }
+    std::cout << "[PaperService] ✓ revisionsDir created successfully" << std::endl;
 
     std::cout << "[PaperService] Checking for duplicate paperId..." << std::endl;
     // 防止重复 paperId
