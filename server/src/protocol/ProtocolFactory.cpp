@@ -63,16 +63,34 @@ private:
 
 void ProtocolFactory::handleRequest(socket_t clientSocket) {
     // 1. 读取客户端命令
+    std::string commandStr;
     char buffer[4096];
-    ssize_t bytesRecv = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
     
-    if (bytesRecv <= 0) {
-        if (bytesRecv == 0) std::cout << "Client disconnected gracefully." << std::endl;
-        else std::cerr << "Recv failed: " << get_socket_error_string() << std::endl;
+    // 循环读取直到连接关闭或没有更多数据
+    while (true) {
+        ssize_t bytesRecv = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+        
+        if (bytesRecv < 0) {
+            std::cerr << "Recv failed: " << get_socket_error_string() << std::endl;
+            return;
+        }
+        
+        if (bytesRecv == 0) {
+            // 客户端关闭了连接（或写端）
+            break;
+        }
+        
+        buffer[bytesRecv] = '\0';
+        commandStr += std::string(buffer, bytesRecv);
+    }
+    
+    if (commandStr.empty()) {
+        std::cout << "Received empty command" << std::endl;
         return;
     }
-    buffer[bytesRecv] = '\0';
-    std::string commandStr(buffer);
+    
+    std::cout << "Received command (" << commandStr.length() << " bytes): " 
+              << commandStr.substr(0, 100) << (commandStr.length() > 100 ? "..." : "") << std::endl;
 
     // 2. 从服务中心获取所有服务实例
     auto& services = AppServices::instance();
@@ -90,10 +108,23 @@ void ProtocolFactory::handleRequest(socket_t clientSocket) {
 
     // 4. 处理命令
     std::string response;
+    std::cout << "Processing command..." << std::endl;
     cliProtocol.processCommand(commandStr, response);
+    std::cout << "Command processed. Response length: " << response.length() << " bytes" << std::endl;
+    
+    if (!response.empty()) {
+        std::cout << "Response: " << response.substr(0, 100) << (response.length() > 100 ? "..." : "") << std::endl;
+    }
 
     // 5. 将响应发回客户端
     if (!response.empty()) {
-        send(clientSocket, response.c_str(), static_cast<int>(response.length()), 0);
+        ssize_t sent = send(clientSocket, response.c_str(), static_cast<int>(response.length()), 0);
+        if (sent < 0) {
+            std::cerr << "Failed to send response: " << get_socket_error_string() << std::endl;
+        } else {
+            std::cout << "Response sent successfully (" << sent << " bytes)" << std::endl;
+        }
+    } else {
+        std::cout << "Warning: Empty response generated" << std::endl;
     }
 }

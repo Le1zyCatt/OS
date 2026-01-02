@@ -9,6 +9,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <iostream>
 
 namespace {
 
@@ -128,26 +129,32 @@ bool PaperService::uploadPaper(const std::string& sessionToken,
                               const std::string& paperIdRaw,
                               const std::string& content,
                               std::string& errorMsg) {
+    std::cout << "[PaperService] uploadPaper called for paperId: " << paperIdRaw << std::endl;
+    
     const std::string paperId = normalizeId(paperIdRaw);
     if (paperId.empty()) {
         errorMsg = "paperId is empty.";
         return false;
     }
 
+    std::cout << "[PaperService] Validating token..." << std::endl;
     std::string username;
     if (!validateToken(authenticator_, sessionToken, username, errorMsg)) return false;
 
+    std::cout << "[PaperService] Checking permissions..." << std::endl;
     const UserRole role = authenticator_->getUserRole(sessionToken);
     if (!permissionChecker_->hasPermission(role, Permission::PAPER_UPLOAD)) {
         errorMsg = "Permission denied.";
         return false;
     }
 
+    std::cout << "[PaperService] Creating directory structure..." << std::endl;
     // 创建目录结构
     fsProtocol_->createDirectory(paperRoot(paperId), errorMsg);
     fsProtocol_->createDirectory(reviewsDir(paperId), errorMsg);
     fsProtocol_->createDirectory(revisionsDir(paperId), errorMsg);
 
+    std::cout << "[PaperService] Checking for duplicate paperId..." << std::endl;
     // 防止重复 paperId
     std::string existing;
     if (fsProtocol_->readFile(metaPath(paperId), existing, errorMsg)) {
@@ -155,6 +162,7 @@ bool PaperService::uploadPaper(const std::string& sessionToken,
         return false;
     }
 
+    std::cout << "[PaperService] Writing metadata..." << std::endl;
     Meta meta;
     meta.author = username;
     meta.status = "SUBMITTED";
@@ -162,12 +170,16 @@ bool PaperService::uploadPaper(const std::string& sessionToken,
     meta.reviewers.clear();
 
     if (!writeMeta(fsProtocol_, paperId, meta, errorMsg)) return false;
+    
+    std::cout << "[PaperService] Writing current content..." << std::endl;
     if (!fsProtocol_->writeFile(currentPath(paperId), content, errorMsg)) return false;
 
+    std::cout << "[PaperService] Writing revision..." << std::endl;
     // 记录一个 revision
     const std::string revPath = revisionsDir(paperId) + "/" + nowRevisionName() + ".txt";
     fsProtocol_->writeFile(revPath, content, errorMsg);
 
+    std::cout << "[PaperService] Upload completed successfully" << std::endl;
     return true;
 }
 

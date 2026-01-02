@@ -55,6 +55,10 @@ private:
     // 辅助函数：递归创建目录
     bool ensureDirectoryExists(const std::string& path, std::string& errorMsg);
     
+    // 内部函数（不加锁，调用者已持有锁）
+    bool ensureDirectoryExistsInternal(const std::string& path, std::string& errorMsg);
+    bool createDirectoryInternal(const std::string& path, std::string& errorMsg);
+    
     // 辅助函数：规范化路径
     std::string normalizePath(const std::string& path);
 };

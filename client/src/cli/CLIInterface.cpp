@@ -18,6 +18,8 @@ CLIInterface::~CLIInterface() {
 void CLIInterface::setServerAddress(const std::string& host, int port) {
     serverHost_ = host;
     serverPort_ = port;
+    // 同时设置NetworkClient的默认服务器地址
+    network_->setDefaultServer(host, port);
 }
 
 void CLIInterface::run() {

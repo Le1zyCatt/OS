@@ -219,6 +219,28 @@ int inode_write_data(int fd, Inode* inode, int inode_id,
             block_id = pointers[block_index - DIRECT_BLOCK_COUNT];
         }
         
+        // COW检查：如果块的引用计数 > 1，需要复制块
+        int ref_count = get_block_ref_count(fd, block_id);
+        if (ref_count > 1) {
+            // 执行COW：复制块
+            int new_block_id = copy_on_write_block(fd, block_id);
+            if (new_block_id == -1) {
+                return written; // COW失败，返回已写入的字节数
+            }
+            
+            // 更新inode中的块指针
+            if (block_index < DIRECT_BLOCK_COUNT) {
+                inode->direct_blocks[block_index] = new_block_id;
+            } else {
+                int pointers[POINTERS_PER_BLOCK];
+                read_block(fd, inode->indirect_block, pointers);
+                pointers[block_index - DIRECT_BLOCK_COUNT] = new_block_id;
+                write_block(fd, inode->indirect_block, (void*)pointers);
+            }
+            
+            block_id = new_block_id;
+        }
+        
         // 如果不是整块写入，需要先读取再写入
         if (block_offset != 0 || to_write != BLOCK_SIZE) {
             char temp_buf[BLOCK_SIZE];

@@ -97,6 +97,12 @@ bool RealFileSystemAdapter::getParentAndName(const std::string& path, int& paren
 }
 
 bool RealFileSystemAdapter::ensureDirectoryExists(const std::string& path, std::string& errorMsg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return ensureDirectoryExistsInternal(path, errorMsg);
+}
+
+// 内部函数，不加锁（调用者已持有锁）
+bool RealFileSystemAdapter::ensureDirectoryExistsInternal(const std::string& path, std::string& errorMsg) {
     std::string normPath = normalizePath(path);
     
     // 根目录总是存在
@@ -131,12 +137,12 @@ bool RealFileSystemAdapter::ensureDirectoryExists(const std::string& path, std::
     }
     
     std::string parentPath = (lastSlash == 0) ? "/" : normPath.substr(0, lastSlash);
-    if (!ensureDirectoryExists(parentPath, errorMsg)) {
+    if (!ensureDirectoryExistsInternal(parentPath, errorMsg)) {
         return false;
     }
     
-    // 创建当前目录
-    return createDirectory(normPath, errorMsg);
+    // 创建当前目录（使用内部函数，避免重复加锁）
+    return createDirectoryInternal(normPath, errorMsg);
 }
 
 // ==================== FSProtocol 接口实现 ====================
@@ -281,10 +287,10 @@ bool RealFileSystemAdapter::writeFile(const std::string& path, const std::string
         return false;
     }
     
-    // 确保父目录存在
+    // 确保父目录存在（使用内部函数，避免重复加锁）
     size_t lastSlash = normPath.find_last_of('/');
     std::string parentPath = (lastSlash == 0) ? "/" : normPath.substr(0, lastSlash);
-    if (!ensureDirectoryExists(parentPath, errorMsg)) {
+    if (!ensureDirectoryExistsInternal(parentPath, errorMsg)) {
         return false;
     }
     
@@ -420,7 +426,11 @@ bool RealFileSystemAdapter::deleteFile(const std::string& path, std::string& err
 
 bool RealFileSystemAdapter::createDirectory(const std::string& path, std::string& errorMsg) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    
+    return createDirectoryInternal(path, errorMsg);
+}
+
+// 内部函数，不加锁（调用者已持有锁）
+bool RealFileSystemAdapter::createDirectoryInternal(const std::string& path, std::string& errorMsg) {
     std::string normPath = normalizePath(path);
     
     // 根目录已存在
@@ -431,8 +441,18 @@ bool RealFileSystemAdapter::createDirectory(const std::string& path, std::string
     // 检查目录是否已存在
     int existingInodeId = get_inode_by_path(m_fd, normPath.c_str());
     if (existingInodeId >= 0) {
-        errorMsg = "Directory already exists: " + normPath;
-        return false;
+        // 目录已存在，这不是错误（幂等操作）
+        return true;
+    }
+    
+    // 确保父目录存在（递归创建）
+    size_t lastSlash = normPath.find_last_of('/');
+    if (lastSlash != std::string::npos && lastSlash > 0) {
+        std::string parentPath = normPath.substr(0, lastSlash);
+        // 递归确保父目录存在
+        if (!ensureDirectoryExistsInternal(parentPath, errorMsg)) {
+            return false;
+        }
     }
     
     // 获取父目录和目录名

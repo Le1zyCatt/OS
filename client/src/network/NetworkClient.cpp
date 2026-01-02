@@ -1,6 +1,7 @@
 #include "network/NetworkClient.h"
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <cstring>
 #include <iostream>
@@ -32,11 +33,18 @@ bool NetworkClient::connect(const std::string& host, int port, std::string& erro
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(port);
 
-    // 转换IP地址
+    // 转换IP地址或主机名
+    // 先尝试作为IP地址解析
     if (inet_pton(AF_INET, host.c_str(), &serverAddr.sin_addr) <= 0) {
-        errorMsg = "Invalid address: " + host;
-        closeSocket();
-        return false;
+        // 如果不是IP地址，尝试解析主机名
+        struct hostent* he = gethostbyname(host.c_str());
+        if (he == nullptr || he->h_addr_list[0] == nullptr) {
+            errorMsg = "Invalid address or hostname: " + host;
+            closeSocket();
+            return false;
+        }
+        // 使用解析出的第一个IP地址
+        std::memcpy(&serverAddr.sin_addr, he->h_addr_list[0], he->h_length);
     }
 
     // 连接到服务器
@@ -125,6 +133,11 @@ void NetworkClient::disconnect() {
 
 bool NetworkClient::isConnected() const {
     return connected_;
+}
+
+void NetworkClient::setDefaultServer(const std::string& host, int port) {
+    host_ = host;
+    port_ = port;
 }
 
 bool NetworkClient::createSocket(std::string& errorMsg) {

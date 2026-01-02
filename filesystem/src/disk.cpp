@@ -7,6 +7,8 @@
 #include <iostream>
 #include <cassert>
 #include <ctime>
+#include <vector>
+#include <map>
 
 // 在 disk.cpp 文件中添加以下前向声明
 void check_and_repair_filesystem(int fd);
@@ -115,6 +117,9 @@ void check_ref_count_consistency(int fd, const char* block_bitmap) {
     int issues = 0;
     int max_blocks = (BLOCK_SIZE * 8 < BLOCK_COUNT) ? BLOCK_SIZE * 8 : BLOCK_COUNT;
     
+    // 批量修复：先收集所有需要修复的块
+    std::vector<int> blocks_to_fix;
+    
     for (int i = DATA_BLOCK_START; i < max_blocks; i++) {
         int byte_idx = i / 8;
         int bit_idx = i % 8;
@@ -126,29 +131,50 @@ void check_ref_count_consistency(int fd, const char* block_bitmap) {
             // 已分配的块ref_count应该 >= 1
             if (ref_count <= 0) {
                 issues++;
-                // 只在发现少量问题时修复，太多问题说明数据损坏严重
-                if (issues <= 10) {
-                    std::cout << "修复块" << i << "的RefCount: " << ref_count << " → 1" << std::endl;
-                    
-                    int ref_count_block_offset = i / BLOCK_SIZE;
-                    int ref_count_index = i % BLOCK_SIZE;
-                    if (ref_count_block_offset < REF_COUNT_TABLE_BLOCKS) {
-                        char ref_count_buf[BLOCK_SIZE];
-                        read_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
-                        ref_count_buf[ref_count_index] = 1;
-                        write_block(fd, REF_COUNT_TABLE_START + ref_count_block_offset, ref_count_buf);
-                        repairs++;
-                    }
-                }
+                blocks_to_fix.push_back(i);
             }
         }
     }
     
-    if (issues > 10) {
-        std::cout << "⚠ 发现" << issues << "个RefCount问题，仅修复了前10个。"
-                  << "建议运行 fsck 进行完整修复" << std::endl;
-    } else if (repairs > 0) {
-        std::cout << "修复了 " << repairs << " 个引用计数问题" << std::endl;
+    // 批量修复所有问题块
+    if (!blocks_to_fix.empty()) {
+        // 按RefCount表块分组，减少磁盘I/O
+        std::map<int, std::vector<int>> blocks_by_ref_table;
+        
+        for (int block_id : blocks_to_fix) {
+            int ref_count_block_offset = block_id / BLOCK_SIZE;
+            if (ref_count_block_offset < REF_COUNT_TABLE_BLOCKS) {
+                blocks_by_ref_table[ref_count_block_offset].push_back(block_id);
+            }
+        }
+        
+        // 逐个RefCount表块进行修复
+        for (auto& pair : blocks_by_ref_table) {
+            int ref_table_block = pair.first;
+            std::vector<int>& blocks = pair.second;
+            
+            char ref_count_buf[BLOCK_SIZE];
+            read_block(fd, REF_COUNT_TABLE_START + ref_table_block, ref_count_buf);
+            
+            for (int block_id : blocks) {
+                int ref_count_index = block_id % BLOCK_SIZE;
+                ref_count_buf[ref_count_index] = 1;
+                repairs++;
+                
+                // 只打印前10个修复信息，避免输出过多
+                if (repairs <= 10) {
+                    std::cout << "修复块" << block_id << "的RefCount: 0 → 1" << std::endl;
+                }
+            }
+            
+            write_block(fd, REF_COUNT_TABLE_START + ref_table_block, ref_count_buf);
+        }
+        
+        if (repairs > 10) {
+            std::cout << "✓ 共修复了 " << repairs << " 个RefCount问题" << std::endl;
+        } else if (repairs > 0) {
+            std::cout << "✓ 修复了 " << repairs << " 个引用计数问题" << std::endl;
+        }
     } else {
         std::cout << "✓ RefCount一致性检查通过" << std::endl;
     }
@@ -663,7 +689,11 @@ int restore_snapshot(int fd, int snapshot_id) {
     Snapshot snapshot = snapshots[entry_idx];
     std::cout << "准备恢复快照，根inode_id: " << snapshot.root_inode_id << std::endl;
     
-    // 读取快照的块位图（需要在覆盖前保存）
+    // 读取当前的块位图（在覆盖前保存）
+    char current_block_bitmap[BLOCK_SIZE];
+    read_block(fd, BLOCK_BITMAP_BLOCK, current_block_bitmap);
+    
+    // 读取快照的块位图
     char snapshot_block_bitmap[BLOCK_SIZE];
     read_block(fd, snapshot.block_bitmap_block, snapshot_block_bitmap);
     
@@ -687,15 +717,26 @@ int restore_snapshot(int fd, int snapshot_id) {
         write_block(fd, INODE_TABLE_START + i, inode_block);
     }
     
-    // 4. 清除快照对块的引用计数
+    // 4. 更新引用计数
+    // 对于在当前文件系统中使用但不在快照中的块，减少引用计数
+    // 对于在快照中但不在当前文件系统中的块，不需要改变（快照已经持有引用）
     int max_blocks = (BLOCK_SIZE * 8 < BLOCK_COUNT) ? BLOCK_SIZE * 8 : BLOCK_COUNT;
     for (int block_id_iter = DATA_BLOCK_START; block_id_iter < max_blocks; block_id_iter++) {
         int byte_index = block_id_iter / 8;
         int bit_index = block_id_iter % 8;
         
-        if (snapshot_block_bitmap[byte_index] & (1 << bit_index)) {
-            decrement_block_ref_count(fd, block_id_iter);
+        bool in_current = (current_block_bitmap[byte_index] & (1 << bit_index)) != 0;
+        bool in_snapshot = (snapshot_block_bitmap[byte_index] & (1 << bit_index)) != 0;
+        
+        // 如果块在当前文件系统中但不在快照中，减少引用计数
+        if (in_current && !in_snapshot) {
+            int ref_count = get_block_ref_count(fd, block_id_iter);
+            if (ref_count > 0) {
+                decrement_block_ref_count(fd, block_id_iter);
+            }
         }
+        // 如果块在快照中但不在当前文件系统中，不需要操作
+        // 因为快照创建时已经增加了引用计数
     }
     
     std::cout << "快照恢复成功" << std::endl;

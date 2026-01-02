@@ -55,6 +55,13 @@ public:
      */
     bool isConnected() const;
 
+    /**
+     * 设置默认服务器地址（用于后续连接）
+     * @param host 服务器地址
+     * @param port 服务器端口
+     */
+    void setDefaultServer(const std::string& host, int port);
+
 private:
     int socket_fd_;
     bool connected_;
