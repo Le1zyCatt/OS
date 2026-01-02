@@ -436,6 +436,12 @@ bool PaperService::assignReviewer(const std::string& sessionToken,
         return false;
     }
 
+    // 验证审稿人用户是否存在
+    if (!authenticator_->userExists(reviewerUsername)) {
+        errorMsg = "Reviewer user '" + reviewerUsername + "' does not exist.";
+        return false;
+    }
+
     Meta meta;
     if (!readMeta(fsProtocol_, paperId, meta, errorMsg)) return false;
 

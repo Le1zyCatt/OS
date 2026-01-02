@@ -3,6 +3,7 @@
 #include "FSProtocol.h"
 #include <string>
 #include <mutex>
+#include <unordered_map>
 
 // 前向声明，避免包含整个 filesystem 头文件
 struct Inode;
@@ -42,9 +43,18 @@ public:
     std::string submitForReview(const std::string& operation, const std::string& path, 
                                 const std::string& user, std::string& errorMsg) override;
 
+    // 新增：获取论文访问统计
+    size_t getPaperAccessCount(const std::string& paperId) const;
+    
+    // 新增：获取 block cache 统计
+    void getBlockCacheStats(size_t& hits, size_t& misses, size_t& size, size_t& capacity) const;
+
 private:
     int m_fd;                    // 磁盘文件描述符
     mutable std::mutex m_mutex;  // 全局互斥锁，保护所有 filesystem 操作
+    
+    // 论文访问统计（paperId -> 访问次数）
+    mutable std::unordered_map<std::string, size_t> m_paperAccessCounts;
     
     // 辅助函数：路径解析
     int pathToInodeId(const std::string& path, std::string& errorMsg);

@@ -72,7 +72,7 @@ private:
     void handleBackupList();
     void handleBackupRestore(const std::vector<std::string>& args);
     void handleSystemStatus();
-    void handleCacheStats();
+    void handleCacheStats(const std::vector<std::string>& args);
     void handleCacheClear();
 
     // ========== 辅助函数 ==========

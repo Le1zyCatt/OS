@@ -4,6 +4,7 @@
 #include "../../include/auth/PermissionChecker.h"
 #include <string>
 #include <ctime> // 用于生成时间戳
+#include <iostream> // 用于调试输出
 
 // 构造函数实现
 BackupFlow::BackupFlow(Authenticator* auth, PermissionChecker* perm, FSProtocol* fs)

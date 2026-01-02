@@ -40,4 +40,7 @@ public:
     virtual bool deleteUser(const std::string& username, std::string& errorMsg) = 0;
 
     virtual std::vector<std::pair<std::string, UserRole>> listUsers(std::string& errorMsg) = 0;
+
+    // 检查用户是否存在
+    virtual bool userExists(const std::string& username) = 0;
 };

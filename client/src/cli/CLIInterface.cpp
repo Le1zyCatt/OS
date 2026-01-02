@@ -134,7 +134,7 @@ void CLIInterface::handleCommand(const std::string& input) {
     } else if (cmd == "system_status") {
         handleSystemStatus();
     } else if (cmd == "cache_stats") {
-        handleCacheStats();
+        handleCacheStats(args);
     } else if (cmd == "cache_clear") {
         handleCacheClear();
     }
@@ -361,12 +361,9 @@ void CLIInterface::handleUserList() {
 }
 
 void CLIInterface::handleBackupCreate(const std::vector<std::string>& args) {
-    if (args.size() < 2) {
-        displayError("用法: backup_create <路径> [快照名称]");
-        return;
-    }
-    std::string name = args.size() >= 3 ? args[2] : "";
-    std::string command = CommandBuilder::buildBackupCreate(session_->getCurrentToken(), args[1], name);
+    // 快照是全局的，只需要可选的名称参数
+    std::string name = (args.size() >= 2) ? args[1] : "";
+    std::string command = CommandBuilder::buildBackupCreate(session_->getCurrentToken(), name);
     sendCommandAndDisplay(command);
 }
 
@@ -389,8 +386,9 @@ void CLIInterface::handleSystemStatus() {
     sendCommandAndDisplay(command);
 }
 
-void CLIInterface::handleCacheStats() {
-    std::string command = CommandBuilder::buildCacheStats(session_->getCurrentToken());
+void CLIInterface::handleCacheStats(const std::vector<std::string>& args) {
+    std::string paperId = (args.size() >= 2) ? args[1] : "";
+    std::string command = CommandBuilder::buildCacheStats(session_->getCurrentToken(), paperId);
     sendCommandAndDisplay(command);
 }
 
@@ -507,11 +505,11 @@ void CLIInterface::showAdminHelp() {
     std::cout << "  user_add <用户名> <密码> <角色>  - 添加用户\n";
     std::cout << "  user_del <用户名>                - 删除用户\n";
     std::cout << "  user_list                        - 列出所有用户\n";
-    std::cout << "  backup_create <路径> [名称]      - 创建备份\n";
-    std::cout << "  backup_list                      - 列出所有备份\n";
-    std::cout << "  backup_restore <名称>            - 恢复备份\n";
+    std::cout << "  backup_create [名称]             - 创建全局快照（不含用户账户）\n";
+    std::cout << "  backup_list                      - 列出所有快照\n";
+    std::cout << "  backup_restore <名称>            - 恢复快照（不影响用户账户）\n";
     std::cout << "  system_status                    - 查看系统状态\n";
-    std::cout << "  cache_stats                      - 查看缓存统计\n";
+    std::cout << "  cache_stats [论文ID]             - 查看缓存统计（可选指定论文ID）\n";
     std::cout << "  cache_clear                      - 清空缓存\n";
     std::cout << "\n========== 通用命令 ==========\n";
     std::cout << "  read <路径>                      - 读取文件\n";

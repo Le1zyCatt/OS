@@ -1,5 +1,6 @@
 #include "../../include/protocol/CLIProtocol.h"
 #include "../../include/protocol/FSProtocol.h"
+#include "../../include/protocol/RealFileSystemAdapter.h"
 #include "../../include/auth/Authenticator.h"
 #include "../../include/auth/PermissionChecker.h"
 #include "../../include/business/BackupFlow.h"
@@ -9,6 +10,7 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
+#include <iomanip>
 
 namespace {
 
@@ -102,10 +104,10 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
         if (role == UserRole::ADMIN) oss << "Admin: USER_ADD USER_DEL USER_LIST BACKUP_CREATE BACKUP_LIST BACKUP_RESTORE SYSTEM_STATUS CACHE_STATS CACHE_CLEAR\n";
         response = oss.str();
     } else if (cmd == "CACHE_STATS") {
-        std::string sessionId;
-        ss >> sessionId;
+        std::string sessionId, paperId;
+        ss >> sessionId >> paperId;  // paperId 是可选的
         if (sessionId.empty()) {
-            response = "ERROR: Usage: CACHE_STATS <sessionToken>";
+            response = "ERROR: Usage: CACHE_STATS <sessionToken> [paperId]";
             return false;
         }
 
@@ -119,17 +121,45 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             response = "ERROR: Permission denied.";
             return false;
         }
-        if (!m_cacheStatsProvider) {
-            response = "ERROR: Cache stats not available.";
-            return false;
+
+        std::ostringstream oss;
+        oss << "OK:";
+
+        // 如果指定了论文ID，返回论文级统计
+        if (!paperId.empty()) {
+            // 尝试从 RealFileSystemAdapter 获取论文访问统计
+            // 需要通过 dynamic_cast 访问具体实现
+            if (auto* realFS = dynamic_cast<RealFileSystemAdapter*>(m_fs)) {
+                size_t accessCount = realFS->getPaperAccessCount(paperId);
+                oss << " paperId=" << paperId
+                    << " access_count=" << accessCount;
+            } else {
+                oss << " paperId=" << paperId
+                    << " access_count=N/A";
+            }
         }
 
-        const CacheStats s = m_cacheStatsProvider->cacheStats();
-        std::ostringstream oss;
-        oss << "OK: hits=" << s.hits
-            << " misses=" << s.misses
-            << " size=" << s.size
-            << " capacity=" << s.capacity;
+        // 总是返回 block cache 统计
+        if (auto* realFS = dynamic_cast<RealFileSystemAdapter*>(m_fs)) {
+            size_t hits, misses, size, capacity;
+            realFS->getBlockCacheStats(hits, misses, size, capacity);
+            size_t total = hits + misses;
+            double hitRate = (total > 0) ? (100.0 * hits / total) : 0.0;
+            
+            oss << " block_cache_hits=" << hits
+                << " block_cache_misses=" << misses
+                << " block_cache_hit_rate=" << std::fixed << std::setprecision(2) << hitRate << "%"
+                << " block_cache_size=" << size
+                << " block_cache_capacity=" << capacity;
+        } else if (m_cacheStatsProvider) {
+            // 回退到旧的文件级缓存统计
+            const CacheStats s = m_cacheStatsProvider->cacheStats();
+            oss << " file_cache_hits=" << s.hits
+                << " file_cache_misses=" << s.misses
+                << " file_cache_size=" << s.size
+                << " file_cache_capacity=" << s.capacity;
+        }
+
         response = oss.str();
     } else if (cmd == "CACHE_CLEAR") {
         std::string sessionId;
@@ -232,15 +262,16 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             response = "ERROR: " + errorMsg;
         }
     } else if (cmd == "BACKUP" || cmd == "BACKUP_CREATE") {
-        std::string sessionId, path, name;
-        ss >> sessionId >> path >> name;
-        if (sessionId.empty() || path.empty()) {
-            response = "ERROR: Usage: BACKUP_CREATE <sessionToken> <path> [name]";
+        std::string sessionId, name;
+        ss >> sessionId >> name;
+        if (sessionId.empty()) {
+            response = "ERROR: Usage: BACKUP_CREATE <sessionToken> [name]";
             return false;
         }
         // name 为空时由 flow 生成默认名称
-        if (m_backupFlow->createBackup(sessionId, path, name, errorMsg)) {
-            response = "OK: Backup created.";
+        // 快照是全局的，不需要路径参数
+        if (m_backupFlow->createBackup(sessionId, "/", name, errorMsg)) {
+            response = "OK: Backup created. (快照包含整个文件系统，不包括用户账户)";
         } else {
             response = "ERROR: " + errorMsg;
         }
@@ -288,7 +319,7 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             return false;
         }
         if (m_fs->restoreSnapshot(name, errorMsg)) {
-            response = "OK: Restored.";
+            response = "OK: Restored. (已恢复文件系统，用户账户不受影响)";
         } else {
             response = "ERROR: " + errorMsg;
         }

@@ -36,11 +36,11 @@ public:
     static std::string buildUserAdd(const std::string& token, const std::string& username, const std::string& password, const std::string& role);
     static std::string buildUserDel(const std::string& token, const std::string& username);
     static std::string buildUserList(const std::string& token);
-    static std::string buildBackupCreate(const std::string& token, const std::string& path, const std::string& name = "");
+    static std::string buildBackupCreate(const std::string& token, const std::string& name = "");
     static std::string buildBackupList(const std::string& token);
     static std::string buildBackupRestore(const std::string& token, const std::string& name);
     static std::string buildSystemStatus(const std::string& token);
-    static std::string buildCacheStats(const std::string& token);
+    static std::string buildCacheStats(const std::string& token, const std::string& paperId = "");
     static std::string buildCacheClear(const std::string& token);
 
     // ========== 审核流程命令 ==========

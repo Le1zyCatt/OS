@@ -75,11 +75,11 @@ std::string CommandBuilder::buildUserList(const std::string& token) {
     return "USER_LIST " + token;
 }
 
-std::string CommandBuilder::buildBackupCreate(const std::string& token, const std::string& path, const std::string& name) {
+std::string CommandBuilder::buildBackupCreate(const std::string& token, const std::string& name) {
     if (name.empty()) {
-        return "BACKUP_CREATE " + token + " " + path;
+        return "BACKUP_CREATE " + token;
     }
-    return "BACKUP_CREATE " + token + " " + path + " " + name;
+    return "BACKUP_CREATE " + token + " " + name;
 }
 
 std::string CommandBuilder::buildBackupList(const std::string& token) {
@@ -94,8 +94,12 @@ std::string CommandBuilder::buildSystemStatus(const std::string& token) {
     return "SYSTEM_STATUS " + token;
 }
 
-std::string CommandBuilder::buildCacheStats(const std::string& token) {
-    return "CACHE_STATS " + token;
+std::string CommandBuilder::buildCacheStats(const std::string& token, const std::string& paperId) {
+    std::string cmd = "CACHE_STATS " + token;
+    if (!paperId.empty()) {
+        cmd += " " + paperId;
+    }
+    return cmd;
 }
 
 std::string CommandBuilder::buildCacheClear(const std::string& token) {

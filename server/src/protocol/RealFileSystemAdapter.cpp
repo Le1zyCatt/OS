@@ -250,6 +250,18 @@ bool RealFileSystemAdapter::readFile(const std::string& path, std::string& conte
     
     std::string normPath = normalizePath(path);
     
+    // 跟踪论文访问：如果路径包含 /papers/，提取论文ID并增加计数
+    if (normPath.find("/papers/") == 0) {
+        size_t start = 8;  // "/papers/" 的长度
+        size_t end = normPath.find('/', start);
+        if (end != std::string::npos) {
+            std::string paperId = normPath.substr(start, end - start);
+            if (!paperId.empty()) {
+                m_paperAccessCounts[paperId]++;
+            }
+        }
+    }
+    
     // 获取文件的 inode ID
     int inodeId = pathToInodeId(normPath, errorMsg);
     if (inodeId < 0) {
@@ -576,5 +588,18 @@ std::string RealFileSystemAdapter::submitForReview(const std::string& operation,
     (void)user;
     (void)errorMsg;
     return "OK";  // 占位返回
+}
+
+// ==================== 统计接口实现 ====================
+
+size_t RealFileSystemAdapter::getPaperAccessCount(const std::string& paperId) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_paperAccessCounts.find(paperId);
+    return (it != m_paperAccessCounts.end()) ? it->second : 0;
+}
+
+void RealFileSystemAdapter::getBlockCacheStats(size_t& hits, size_t& misses, size_t& size, size_t& capacity) const {
+    // 调用 filesystem 的 C 接口获取 block cache 统计
+    block_cache_get_stats(&hits, &misses, &size, &capacity);
 }
 

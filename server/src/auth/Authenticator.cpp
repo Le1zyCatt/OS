@@ -170,6 +170,11 @@ public:
         return out;
     }
 
+    bool userExists(const std::string& username) override {
+        std::scoped_lock lock(m_mutex);
+        return m_users.find(username) != m_users.end();
+    }
+
 private:
     std::mutex m_mutex;
     std::unordered_map<std::string, UserRecord> m_users{
