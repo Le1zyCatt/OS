@@ -61,14 +61,14 @@ private:
 };
 
 
-void ProtocolFactory::handleRequest(SOCKET clientSocket) {
+void ProtocolFactory::handleRequest(socket_t clientSocket) {
     // 1. 读取客户端命令
     char buffer[4096];
-    int bytesRecv = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+    ssize_t bytesRecv = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
     
     if (bytesRecv <= 0) {
         if (bytesRecv == 0) std::cout << "Client disconnected gracefully." << std::endl;
-        else std::cerr << "Recv failed: " << WSAGetLastError() << std::endl;
+        else std::cerr << "Recv failed: " << get_socket_error_string() << std::endl;
         return;
     }
     buffer[bytesRecv] = '\0';

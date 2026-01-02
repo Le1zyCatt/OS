@@ -7,8 +7,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 查找 src 目录下的所有 .cpp 源文件
 file(GLOB_RECURSE CPP_FILES "src/*.cpp")
 
-# 将 main.cpp 和 src 目录下的所有文件共同作为服务器的源文件
-set(SERVER_SOURCES main.cpp ${CPP_FILES})
+# 添加 filesystem 模块的源文件
+set(FS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../filesystem")
+set(FS_SOURCES
+    "${FS_DIR}/src/disk.cpp"
+    "${FS_DIR}/src/inode.cpp"
+    "${FS_DIR}/src/directory.cpp"
+    "${FS_DIR}/src/path.cpp"
+    "${FS_DIR}/src/block_cache.cpp"
+)
+
+# 将 main.cpp、server 源文件和 filesystem 源文件共同作为服务器的源文件
+set(SERVER_SOURCES main.cpp ${CPP_FILES} ${FS_SOURCES})
 
 # 定义服务器可执行文件
 add_executable(server ${SERVER_SOURCES})
@@ -19,8 +29,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_client.cpp")
 endif()
 
 # 为服务器和客户端设置 include 目录
-# ${CMAKE_CURRENT_SOURCE_DIR} 指向 d:/work/os/server，可以确保 include 目录被正确找到
-target_include_directories(server PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+# ${CMAKE_CURRENT_SOURCE_DIR} 指向 server 目录，可以确保 include 目录被正确找到
+target_include_directories(server PUBLIC 
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${FS_DIR}/include
+)
 if(TARGET test_client)
     target_include_directories(test_client PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 endif()

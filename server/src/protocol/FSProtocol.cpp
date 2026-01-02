@@ -280,9 +280,25 @@ private:
     mutable std::mutex m_cacheMutex;
 };
 
+// 引入真实文件系统适配器
+#include "../../include/protocol/RealFileSystemAdapter.h"
+
 // 工厂函数：供 ProtocolFactory 使用
 std::unique_ptr<FSProtocol> createFSProtocol() {
     // server侧默认启用一个小容量文件内容缓存，以匹配架构设计中的 Cache(LRU)
-    auto real = std::make_unique<RealFSProtocol>();
-    return std::make_unique<CachingFSProtocol>(std::move(real), 64);
+    
+    // 使用真实的 FileSystem 适配器
+    // 磁盘镜像路径：相对于 server 可执行文件的位置
+    const std::string diskPath = "../../filesystem/disk/disk.img";
+    
+    try {
+        auto real = std::make_unique<RealFileSystemAdapter>(diskPath);
+        return std::make_unique<CachingFSProtocol>(std::move(real), 64);
+    } catch (const std::exception& e) {
+        std::cerr << "⚠️  Failed to initialize real filesystem, falling back to in-memory: " 
+                  << e.what() << std::endl;
+        // 如果真实文件系统初始化失败，回退到内存版本
+        auto real = std::make_unique<RealFSProtocol>();
+        return std::make_unique<CachingFSProtocol>(std::move(real), 64);
+    }
 }
