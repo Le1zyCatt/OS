@@ -38,6 +38,8 @@ import sys
 import argparse
 from typing import List, Tuple, Dict
 import random
+import base64
+from pathlib import Path
 
 # 服务器配置
 SERVER_HOST = 'localhost'
@@ -302,10 +304,127 @@ def test_02_paper_upload():
         print_success(f"论文上传成功: {paper_id}")
         stats.record_test("论文上传", True)
         return paper_id
+
+    print_error(f"论文上传失败: {response[:100]}")
+    stats.record_test("论文上传", False, response)
+    return None
+
+
+def test_02b_cli_filesystem_commands():
+    """测试：新增 CLI 文件系统命令（PWD/LS/TREE）"""
+    print_info("测试新增命令 PWD/LS/TREE...")
+
+    ok, token = login("author", "author123")
+    if not ok:
+        print_error(f"登录失败: {token}")
+        stats.record_test("PWD/LS/TREE-登录", False, token)
+        return
+
+    # PWD
+    resp_pwd = send_command(f"PWD {token}")
+    if resp_pwd.strip() == "OK: /":
+        print_success("PWD 返回根目录")
+        stats.record_test("PWD", True)
     else:
-        print_error(f"论文上传失败: {response[:100]}")
-        stats.record_test("论文上传", False, response)
-        return None
+        print_error(f"PWD 返回异常: {resp_pwd}")
+        stats.record_test("PWD", False, resp_pwd)
+
+    base_dir = f"/cli_test_{int(time.time())}"
+    send_command(f"MKDIR {token} {base_dir}")
+    send_command(f"MKDIR {token} {base_dir}/sub")
+    send_command(f"WRITE {token} {base_dir}/a.txt hello")
+
+    # LS
+    resp_ls = send_command(f"LS {token} {base_dir}")
+    if resp_ls.startswith("OK:") and "a.txt" in resp_ls and "sub/" in resp_ls:
+        print_success("LS 列出目录内容")
+        stats.record_test("LS", True)
+    else:
+        print_error(f"LS 返回异常: {resp_ls}")
+        stats.record_test("LS", False, resp_ls)
+
+    # TREE
+    resp_tree = send_command(f"TREE {token} {base_dir}")
+    if resp_tree.startswith("OK:") and "a.txt" in resp_tree and "sub/" in resp_tree:
+        print_success("TREE 输出目录结构")
+        stats.record_test("TREE", True)
+    else:
+        print_error(f"TREE 返回异常: {resp_tree}")
+        stats.record_test("TREE", False, resp_tree)
+
+
+def test_02c_pdf_upload_base64():
+    """测试：新增 PDF(base64) 上传命令"""
+    print_info("测试新增命令 PAPER_UPLOAD_PDF_B64...")
+
+    ok, token = login("author", "author123")
+    if not ok:
+        print_error(f"登录失败: {token}")
+        stats.record_test("PDF上传-登录", False, token)
+        return
+
+    paper_id = f"pdf_paper_{int(time.time())}"
+
+    # 优先使用仓库内的真实示例 PDF：server/test/pdf_example/*.pdf
+    pdf_bytes: bytes
+    example_dir = Path(__file__).resolve().parent / "pdf_example"
+    pdf_files = sorted(example_dir.glob("*.pdf")) if example_dir.exists() else []
+    if pdf_files:
+        pdf_path = pdf_files[0]
+        print_info(f"使用示例PDF: {pdf_path.name}")
+        pdf_bytes = pdf_path.read_bytes()
+    else:
+        # 回退：构造一个最小 PDF（足够通过 %PDF- 头校验）
+        pdf_bytes = (
+            b"%PDF-1.4\n"
+            b"1 0 obj\n<<>>\nendobj\n"
+            b"trailer\n<<>>\n"
+            b"%%EOF\n"
+        )
+
+    b64 = base64.b64encode(pdf_bytes).decode("ascii")
+
+    # 用通用命令上传（pdf）
+    resp_upload = send_command(f"PAPER_UPLOAD_FILE_B64 {token} {paper_id} pdf {b64}", timeout=30)
+    if resp_upload.startswith("OK:"):
+        print_success("PDF 上传成功")
+        stats.record_test("PAPER_UPLOAD_FILE_B64(pdf)", True)
+    else:
+        print_error(f"PDF 上传失败: {resp_upload}")
+        stats.record_test("PAPER_UPLOAD_FILE_B64(pdf)", False, resp_upload)
+        return
+
+    # 验证文件存在且头部可读
+    resp_read = send_command(f"READ {token} /papers/{paper_id}/current.pdf")
+    if resp_read.startswith("OK:") and "%PDF-" in resp_read[:32]:
+        print_success("PDF 文件已落库且头部正确")
+        stats.record_test("PDF落库校验", True)
+    else:
+        print_error(f"PDF 读取/校验失败: {resp_read[:120]}")
+        stats.record_test("PDF落库校验", False, resp_read[:200])
+
+    # 额外：验证主流格式（docx/rtf）也能上传（这里只做最小头部）
+    docx_id = f"docx_paper_{int(time.time())}"
+    docx_bytes = b"PK\x03\x04" + b"0" * 64
+    docx_b64 = base64.b64encode(docx_bytes).decode("ascii")
+    resp_docx = send_command(f"PAPER_UPLOAD_FILE_B64 {token} {docx_id} docx {docx_b64}")
+    if resp_docx.startswith("OK:"):
+        print_success("DOCX 上传成功")
+        stats.record_test("PAPER_UPLOAD_FILE_B64(docx)", True)
+    else:
+        print_error(f"DOCX 上传失败: {resp_docx[:120]}")
+        stats.record_test("PAPER_UPLOAD_FILE_B64(docx)", False, resp_docx[:200])
+
+    rtf_id = f"rtf_paper_{int(time.time())}"
+    rtf_bytes = b"{\\rtf1\nHello}\n"
+    rtf_b64 = base64.b64encode(rtf_bytes).decode("ascii")
+    resp_rtf = send_command(f"PAPER_UPLOAD_FILE_B64 {token} {rtf_id} rtf {rtf_b64}")
+    if resp_rtf.startswith("OK:"):
+        print_success("RTF 上传成功")
+        stats.record_test("PAPER_UPLOAD_FILE_B64(rtf)", True)
+    else:
+        print_error(f"RTF 上传失败: {resp_rtf[:120]}")
+        stats.record_test("PAPER_UPLOAD_FILE_B64(rtf)", False, resp_rtf[:200])
 
 def test_03_paper_download(paper_id: str):
     """测试3: 论文下载"""
@@ -869,6 +988,8 @@ def run_basic_tests():
     print_header("第一部分：基础功能测试")
     
     test_01_user_authentication()
+    test_02b_cli_filesystem_commands()
+    test_02c_pdf_upload_base64()
     paper_id = test_02_paper_upload()
     test_03_paper_download(paper_id)
     test_04_review_submission(paper_id)
@@ -902,7 +1023,10 @@ def check_server_connection():
         return True
     except Exception as e:
         print_error(f"无法连接到服务器: {e}")
-        print_warning("请确保服务器正在运行：cd server/build && ./server")
+        if sys.platform.startswith("win"):
+            print_warning("请确保服务器正在运行：server\\build\\Release\\server.exe")
+        else:
+            print_warning("请确保服务器正在运行：cd server/build && ./server")
         return False
 
 def main():

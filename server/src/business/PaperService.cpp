@@ -31,6 +31,10 @@ std::string currentPath(const std::string& paperId) {
     return paperRoot(paperId) + "/current.txt";
 }
 
+std::string currentBinaryPath(const std::string& paperId, const std::string& ext) {
+    return paperRoot(paperId) + "/current." + ext;
+}
+
 std::string reviewsDir(const std::string& paperId) {
     return paperRoot(paperId) + "/reviews";
 }
@@ -124,6 +128,68 @@ bool validateToken(Authenticator* auth, const std::string& token, std::string& u
 
 PaperService::PaperService(Authenticator* auth, PermissionChecker* perm, FSProtocol* fs)
     : authenticator_(auth), permissionChecker_(perm), fsProtocol_(fs) {}
+
+bool PaperService::uploadPaperFile(const std::string& sessionToken,
+                                  const std::string& paperIdRaw,
+                                  const std::string& fileExt,
+                                  const std::string& bytes,
+                                  std::string& errorMsg) {
+    const std::string paperId = normalizeId(paperIdRaw);
+    if (paperId.empty()) {
+        errorMsg = "paperId is empty.";
+        return false;
+    }
+    if (fileExt.empty()) {
+        errorMsg = "fileExt is empty.";
+        return false;
+    }
+
+    std::string username;
+    if (!validateToken(authenticator_, sessionToken, username, errorMsg)) return false;
+
+    const UserRole role = authenticator_->getUserRole(sessionToken);
+    if (!permissionChecker_->hasPermission(role, Permission::PAPER_UPLOAD)) {
+        errorMsg = "Permission denied.";
+        return false;
+    }
+
+    // 创建目录结构
+    const std::string rootPath = paperRoot(paperId);
+    if (!fsProtocol_->createDirectory(rootPath, errorMsg)) return false;
+    if (!fsProtocol_->createDirectory(reviewsDir(paperId), errorMsg)) return false;
+    if (!fsProtocol_->createDirectory(revisionsDir(paperId), errorMsg)) return false;
+
+    // 防止重复 paperId
+    std::string existing;
+    if (fsProtocol_->readFile(metaPath(paperId), existing, errorMsg)) {
+        errorMsg = "paperId already exists.";
+        return false;
+    }
+
+    Meta meta;
+    meta.author = username;
+    meta.status = "SUBMITTED";
+    meta.decision.clear();
+    meta.reviewers.clear();
+
+    if (!writeMeta(fsProtocol_, paperId, meta, errorMsg)) return false;
+
+    // current.txt 写一个可读的指针，保持兼容/便于诊断
+    {
+        std::ostringstream oss;
+        oss << "[BINARY_FILE] current." << fileExt;
+        fsProtocol_->writeFile(currentPath(paperId), oss.str(), errorMsg);
+    }
+
+    // 写入二进制文件
+    if (!fsProtocol_->writeFile(currentBinaryPath(paperId, fileExt), bytes, errorMsg)) return false;
+
+    // 记录一个 revision
+    const std::string revPath = revisionsDir(paperId) + "/" + nowRevisionName() + "." + fileExt;
+    fsProtocol_->writeFile(revPath, bytes, errorMsg);
+
+    return true;
+}
 
 bool PaperService::uploadPaper(const std::string& sessionToken,
                               const std::string& paperIdRaw,

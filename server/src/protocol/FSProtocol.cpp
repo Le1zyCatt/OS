@@ -167,6 +167,59 @@ public:
         return reviewId;
     }
 
+    bool listDirectory(const std::string& path, std::vector<std::string>& entries, std::string& errorMsg) override {
+        const std::string normPath = normalizePath(path);
+        std::scoped_lock lock(m_mutex);
+
+        if (m_dirs.find(normPath) == m_dirs.end()) {
+            errorMsg = "Directory not found: " + normPath;
+            return false;
+        }
+
+        std::unordered_set<std::string> seen;
+        std::vector<std::string> out;
+
+        // 子目录
+        for (const auto& d : m_dirs) {
+            if (d == "/") continue;
+            if (parentDir(d) != normPath) continue;
+            const auto pos = d.find_last_of('/');
+            const std::string name = (pos == std::string::npos) ? d : d.substr(pos + 1);
+            if (name.empty()) continue;
+            const std::string decorated = name + "/";
+            if (seen.insert(decorated).second) out.push_back(decorated);
+        }
+
+        // 子文件
+        for (const auto& [p, _content] : m_files) {
+            if (parentDir(p) != normPath) continue;
+            const auto pos = p.find_last_of('/');
+            const std::string name = (pos == std::string::npos) ? p : p.substr(pos + 1);
+            if (name.empty()) continue;
+            if (seen.insert(name).second) out.push_back(name);
+        }
+
+        std::sort(out.begin(), out.end());
+        entries = std::move(out);
+        return true;
+    }
+
+    bool isDirectory(const std::string& path, bool& isDirOut, std::string& errorMsg) override {
+        const std::string normPath = normalizePath(path);
+        std::scoped_lock lock(m_mutex);
+
+        if (m_dirs.find(normPath) != m_dirs.end()) {
+            isDirOut = true;
+            return true;
+        }
+        if (m_files.find(normPath) != m_files.end()) {
+            isDirOut = false;
+            return true;
+        }
+        errorMsg = "Path not found: " + normPath;
+        return false;
+    }
+
 private:
     struct ReviewRequest {
         std::string operation;
@@ -263,6 +316,14 @@ public:
         return m_inner->submitForReview(operation, path, user, errorMsg);
     }
 
+    bool listDirectory(const std::string& path, std::vector<std::string>& entries, std::string& errorMsg) override {
+        return m_inner->listDirectory(path, entries, errorMsg);
+    }
+
+    bool isDirectory(const std::string& path, bool& isDirOut, std::string& errorMsg) override {
+        return m_inner->isDirectory(path, isDirOut, errorMsg);
+    }
+
 private:
     std::unique_ptr<FSProtocol> m_inner;
     LRUCache<std::string, std::string> m_cache;  // 线程安全的LRU缓存
@@ -276,19 +337,25 @@ private:
 // 工厂函数：供 ProtocolFactory 使用
 std::unique_ptr<FSProtocol> createFSProtocol() {
     // server侧默认启用一个小容量文件内容缓存，以匹配架构设计中的 Cache(LRU)
-    
+
+#if defined(SERVER_USE_REAL_FS) && SERVER_USE_REAL_FS
     // 使用真实的 FileSystem 适配器
     // 磁盘镜像路径：相对于 server 可执行文件的位置
     const std::string diskPath = "../../filesystem/disk/disk.img";
-    
+
     try {
         auto real = std::make_unique<RealFileSystemAdapter>(diskPath);
         return std::make_unique<CachingFSProtocol>(std::move(real), 64);
     } catch (const std::exception& e) {
-        std::cerr << "⚠️  Failed to initialize real filesystem, falling back to in-memory: " 
+        std::cerr << "⚠️  Failed to initialize real filesystem, falling back to in-memory: "
                   << e.what() << std::endl;
         // 如果真实文件系统初始化失败，回退到内存版本
         auto real = std::make_unique<RealFSProtocol>();
         return std::make_unique<CachingFSProtocol>(std::move(real), 64);
     }
+#else
+    // Windows/MSVC 默认使用内存版本，避免引入 filesystem 源码的 POSIX 依赖
+    auto real = std::make_unique<RealFSProtocol>();
+    return std::make_unique<CachingFSProtocol>(std::move(real), 64);
+#endif
 }

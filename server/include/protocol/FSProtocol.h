@@ -35,4 +35,10 @@ public:
     // 【FileSystem API 调用点 9】提交审核请求
     virtual std::string submitForReview(const std::string& operation, const std::string& path, 
                                        const std::string& user, std::string& errorMsg) = 0;
+
+    // 【新增】目录遍历/类型查询（用于 CLI: LS/TREE）
+    // entries 返回“当前目录下的直接子项名字”，目录项建议以 '/' 结尾表示目录。
+    virtual bool listDirectory(const std::string& path, std::vector<std::string>& entries, std::string& errorMsg) = 0;
+    // 判断 path 是否为目录；若 path 不存在或读取失败，返回 false 并填写 errorMsg。
+    virtual bool isDirectory(const std::string& path, bool& isDirOut, std::string& errorMsg) = 0;
 };

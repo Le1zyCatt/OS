@@ -5,6 +5,10 @@
 #include <iostream>
 #include <memory>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 // 客户端处理函数，将在线程池中运行
 void HandleClientConnection(socket_t clientSocket) {
     std::cout << "Thread " << std::this_thread::get_id() << ": Handling new client on socket " << clientSocket << std::endl;
@@ -120,6 +124,11 @@ private:
 };
 
 int main() {
+#ifdef _WIN32
+    // 让 Windows 控制台按 UTF-8 解释输出，避免中文变成“鍒濆...”
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+#endif
     // 创建服务器
     // 参数1: 线程池大小（0表示使用硬件并发数）
     // 参数2: 最大任务队列大小

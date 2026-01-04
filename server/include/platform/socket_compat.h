@@ -7,6 +7,7 @@
     // Windows 平台
     #include <winsock2.h>
     #include <ws2tcpip.h>
+    #include <cstdio>
     #pragma comment(lib, "ws2_32.lib")
     
     // Windows 使用 SOCKET 类型
@@ -72,7 +73,7 @@ inline const char* get_socket_error_string() {
 #ifdef _WIN32
     static char buffer[256];
     int error = WSAGetLastError();
-    snprintf(buffer, sizeof(buffer), "Error code: %d", error);
+    std::snprintf(buffer, sizeof(buffer), "Error code: %d", error);
     return buffer;
 #else
     return strerror(errno);

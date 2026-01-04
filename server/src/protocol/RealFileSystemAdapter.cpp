@@ -460,6 +460,83 @@ bool RealFileSystemAdapter::deleteFile(const std::string& path, std::string& err
     return true;
 }
 
+bool RealFileSystemAdapter::isDirectory(const std::string& path, bool& isDirOut, std::string& errorMsg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    const std::string normPath = normalizePath(path);
+    int inodeId = pathToInodeId(normPath, errorMsg);
+    if (inodeId < 0) return false;
+
+    Inode inode;
+    if (read_inode(m_fd, inodeId, &inode) < 0) {
+        errorMsg = "Failed to read inode for: " + normPath;
+        return false;
+    }
+
+    if (inode.type == INODE_TYPE_DIR) {
+        isDirOut = true;
+        return true;
+    }
+    if (inode.type == INODE_TYPE_FILE) {
+        isDirOut = false;
+        return true;
+    }
+
+    errorMsg = "Unknown inode type for: " + normPath;
+    return false;
+}
+
+bool RealFileSystemAdapter::listDirectory(const std::string& path, std::vector<std::string>& entries, std::string& errorMsg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    const std::string normPath = normalizePath(path);
+    int dirInodeId = pathToInodeId(normPath, errorMsg);
+    if (dirInodeId < 0) return false;
+
+    Inode dirInode;
+    if (read_inode(m_fd, dirInodeId, &dirInode) < 0) {
+        errorMsg = "Failed to read inode for: " + normPath;
+        return false;
+    }
+    if (dirInode.type != INODE_TYPE_DIR) {
+        errorMsg = "Path is not a directory: " + normPath;
+        return false;
+    }
+
+    const int entryCount = dirInode.size / static_cast<int>(sizeof(DirEntry));
+    std::vector<std::string> out;
+    out.reserve(std::max(0, entryCount));
+
+    for (int i = 0; i < entryCount; i++) {
+        DirEntry e{};
+        if (dir_get_entry(m_fd, &dirInode, i, &e) < 0) {
+            continue;
+        }
+        if (e.inode_id < 0) continue;
+        if (e.name[0] == '\0') continue;
+
+        std::string name(e.name);
+        if (name.empty()) continue;
+
+        Inode child;
+        if (read_inode(m_fd, e.inode_id, &child) < 0) {
+            // 读不到类型就按文件展示
+            out.push_back(name);
+            continue;
+        }
+
+        if (child.type == INODE_TYPE_DIR) {
+            out.push_back(name + "/");
+        } else {
+            out.push_back(name);
+        }
+    }
+
+    std::sort(out.begin(), out.end());
+    entries = std::move(out);
+    return true;
+}
+
 bool RealFileSystemAdapter::createDirectory(const std::string& path, std::string& errorMsg) {
     std::lock_guard<std::mutex> lock(m_mutex);
     return createDirectoryInternal(path, errorMsg);
@@ -600,6 +677,15 @@ size_t RealFileSystemAdapter::getPaperAccessCount(const std::string& paperId) co
 
 void RealFileSystemAdapter::getBlockCacheStats(size_t& hits, size_t& misses, size_t& size, size_t& capacity) const {
     // 调用 filesystem 的 C 接口获取 block cache 统计
-    block_cache_get_stats(&hits, &misses, &size, &capacity);
+    // filesystem 接口以 unsigned long* 返回，避免 MSVC 下 size_t* 不匹配
+    unsigned long h = 0;
+    unsigned long m = 0;
+    unsigned long s = 0;
+    unsigned long c = 0;
+    block_cache_get_stats(&h, &m, &s, &c);
+    hits = static_cast<size_t>(h);
+    misses = static_cast<size_t>(m);
+    size = static_cast<size_t>(s);
+    capacity = static_cast<size_t>(c);
 }
 

@@ -19,9 +19,12 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import socket
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Optional
 
 
@@ -102,6 +105,48 @@ class ServerClient:
 
         return f"ERROR: 连接/发送失败：{last_exc}"
 
+    def send_raw_bytes(self, command: str) -> bytes:
+        """发送原始命令并返回原始 bytes（不做 token 注入）。
+
+        用途：
+          - READ 二进制文件（例如 PDF）时，不应先 decode 成字符串，否则会出现乱码/替换字符。
+        """
+
+        command = command.strip()
+        if not command:
+            return b"ERROR: empty command"
+
+        last_exc: Optional[Exception] = None
+
+        for attempt in range(self.cfg.retries):
+            try:
+                with socket.create_connection((self.cfg.host, self.cfg.port), timeout=self.cfg.timeout_sec) as s:
+                    s.settimeout(self.cfg.timeout_sec)
+                    s.sendall(command.encode("utf-8"))
+                    try:
+                        s.shutdown(socket.SHUT_WR)
+                    except OSError:
+                        pass
+
+                    chunks: list[bytes] = []
+                    while True:
+                        data = s.recv(BUFFER_SIZE)
+                        if not data:
+                            break
+                        chunks.append(data)
+
+                return b"".join(chunks)
+            except (ConnectionRefusedError, socket.timeout) as e:
+                last_exc = e
+                if attempt < self.cfg.retries - 1:
+                    time.sleep(0.2 * (attempt + 1))
+                    continue
+            except Exception as e:
+                last_exc = e
+                break
+
+        return f"ERROR: 连接/发送失败：{last_exc}".encode("utf-8", errors="replace")
+
     def _get_active_token(self) -> Optional[str]:
         if not self.active_alias:
             return None
@@ -137,6 +182,29 @@ class ServerClient:
         rest = command[len(parts[0]) :].lstrip()
         injected = f"{cmd} {token} {rest}" if rest else f"{cmd} {token}"
         return self.send_raw(injected)
+
+    def send_bytes(self, command: str, *, auto_token: bool = True) -> bytes:
+        """发送命令并返回原始 bytes（默认自动注入 token）。"""
+
+        command = command.strip()
+        if not command:
+            return b"ERROR: empty command"
+
+        cmd = command.split(" ", 1)[0].upper()
+        if not auto_token or cmd == "LOGIN":
+            return self.send_raw_bytes(command)
+
+        token = self._get_active_token()
+        if not token:
+            return "ERROR: 未登录（没有可用 token）。请先执行：LOGIN <用户名> <密码>".encode("utf-8")
+
+        parts = command.split()
+        if len(parts) >= 2 and parts[1] == token:
+            return self.send_raw_bytes(command)
+
+        rest = command[len(parts[0]) :].lstrip()
+        injected = f"{cmd} {token} {rest}" if rest else f"{cmd} {token}"
+        return self.send_raw_bytes(injected)
 
     # ----------------------------
     # 会话管理：登录/登出/切换
@@ -518,16 +586,193 @@ def run_interactive_shell(client: ServerClient) -> int:
             return 0
 
 
+def _print_exchange(command: str, response: str) -> None:
+    print("\n" + "-" * 60)
+    max_cmd_len = 240
+    if len(command) > max_cmd_len:
+        print(f">>> {command[:max_cmd_len]} ...（已截断，原始长度 {len(command)} 字符）")
+    else:
+        print(f">>> {command}")
+    print("--- 响应 ---")
+    if response is None:
+        print("(无响应)")
+        return
+    resp = response.rstrip("\n")
+    # 避免某些命令输出过长导致终端难以阅读
+    max_len = 6000
+    if len(resp) > max_len:
+        print(resp[:max_len])
+        print(f"\n...（已截断，原始长度 {len(resp)} 字符）")
+    else:
+        print(resp)
+
+
+def run_smoke_demo(client: ServerClient) -> int:
+    """自动化演示/冒烟测试：依次执行一批常用命令并打印输出。
+
+    目标：
+      - 覆盖 PWD / LS / TREE 指令与输出展示
+      - 额外跑一遍“主流命令”（文件读写 + 论文流程）以便快速人工验收
+
+    注意：
+      - 本模式不会解析/断言复杂业务语义，只负责“把命令跑通并展示响应”。
+      - 依赖默认账号：admin/admin123, author/author123, editor/editor123, reviewer/reviewer123
+    """
+
+    print("=" * 60)
+    print("自动化演示模式（smoke/demo）")
+    print(f"服务器：{client.cfg.host}:{client.cfg.port}")
+    print("=" * 60)
+
+    # 1) ADMIN：系统/文件相关
+    _print_exchange("LOGIN admin admin123", client.login("admin", "admin123", alias="admin"))
+    _print_exchange("PWD", client.send("PWD"))
+
+    demo_root = f"/demo_test_client_{int(time.time())}"
+    _print_exchange(f"MKDIR {demo_root}", client.send(f"MKDIR {demo_root}"))
+    _print_exchange(f"WRITE {demo_root}/hello.txt hello_from_test_client", client.send(f"WRITE {demo_root}/hello.txt hello_from_test_client"))
+    _print_exchange(f"READ {demo_root}/hello.txt", client.send(f"READ {demo_root}/hello.txt"))
+
+    # 重点：PWD/LS/TREE
+    _print_exchange("LS /", client.send("LS /"))
+    _print_exchange(f"LS {demo_root}", client.send(f"LS {demo_root}"))
+    _print_exchange("TREE /", client.send("TREE /"))
+
+    # 常用管理员命令（输出较长，但对验收很有用）
+    _print_exchange("USER_LIST", client.send("USER_LIST"))
+    _print_exchange("SYSTEM_STATUS", client.send("SYSTEM_STATUS"))
+
+    # 2) AUTHOR：论文上传
+    paper_id = f"demo_paper_{int(time.time())}"
+    _print_exchange("LOGIN author author123", client.login("author", "author123", alias="author"))
+    _print_exchange(f"PAPER_UPLOAD {paper_id} <content>", client.send(f"PAPER_UPLOAD {paper_id} This_is_a_demo_paper_content"))
+    _print_exchange(f"STATUS {paper_id}", client.send(f"STATUS {paper_id}"))
+
+    # 2.1) AUTHOR：二进制论文文件上传（base64）
+    # 说明：
+    #   - 优先用 server/test/pdf_example 下的真实 PDF
+    #   - 若不存在，则用最小 PDF 头部做兜底
+    file_paper_id_pdf = f"demo_file_paper_pdf_{int(time.time())}"
+    file_paper_id_docx = f"demo_file_paper_docx_{int(time.time())}"
+    file_paper_id_rtf = f"demo_file_paper_rtf_{int(time.time())}"
+    pdf_dir = Path(__file__).resolve().parent / "pdf_example"
+    sample_pdf = None
+    if pdf_dir.exists():
+        for p in sorted(pdf_dir.glob("*.pdf")):
+            if p.is_file():
+                sample_pdf = p
+                break
+    if sample_pdf:
+        pdf_bytes = sample_pdf.read_bytes()
+        print(f"\n[i] 使用示例PDF：{sample_pdf.name}（{len(pdf_bytes)} bytes）")
+    else:
+        pdf_bytes = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
+        print("\n[i] 未找到示例PDF，使用最小PDF内容（演示用）")
+
+    pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    _print_exchange(
+        f"PAPER_UPLOAD_FILE_B64 {file_paper_id_pdf} pdf <base64...>",
+        client.send(f"PAPER_UPLOAD_FILE_B64 {file_paper_id_pdf} pdf {pdf_b64}"),
+    )
+
+    # 用 admin 读取，展示头部（便于人工确认）
+    _print_exchange("(切回 admin 会话)", client.use("admin"))
+    _print_exchange(
+        f"READ /papers/{file_paper_id_pdf}/current.pdf",
+        "(二进制内容不直接打印，改为下载并保存到本地文件)",
+    )
+
+    # 二进制可读性证明：把 PDF 原样保存到本地，然后打印头部/大小/SHA256。
+    out_dir = Path(__file__).resolve().parent / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    local_pdf = out_dir / f"{file_paper_id_pdf}.current.pdf"
+    raw = client.send_bytes(f"READ /papers/{file_paper_id_pdf}/current.pdf")
+    if raw.startswith(b"OK: "):
+        pdf_payload = raw[len(b"OK: ") :]
+        local_pdf.write_bytes(pdf_payload)
+        header = pdf_payload[:16]
+        sha256 = hashlib.sha256(pdf_payload).hexdigest()
+        print("\n[i] PDF 下载验证：")
+        print(f"    - 已保存：{local_pdf}")
+        print(f"    - 大小：{len(pdf_payload)} bytes")
+        try:
+            print(f"    - 头部（ASCII）：{header.decode('ascii', errors='replace')}")
+        except Exception:
+            print(f"    - 头部（raw bytes）：{header!r}")
+        print(f"    - SHA-256：{sha256}")
+        if pdf_payload.startswith(b"%PDF-"):
+            print("    - 结论：内容以 %PDF- 开头（是有效 PDF）")
+        else:
+            print("    - 结论：未检测到 %PDF- 头（可能不是 PDF 或被破坏）")
+    else:
+        print("\n[!] PDF 下载失败（原始响应前 200 bytes）：")
+        print(raw[:200].decode("utf-8", errors="replace"))
+
+    # 同时演示 docx/rtf：只做“可上传 + 可读取”验证
+    docx_b64 = base64.b64encode(b"PK\x03\x04" + b"demo_docx_payload").decode("ascii")
+    rtf_b64 = base64.b64encode(b"{\\rtf1\\ansi\nHello}" ).decode("ascii")
+    _print_exchange("(切回 author 会话)", client.use("author"))
+    _print_exchange(
+        f"PAPER_UPLOAD_FILE_B64 {file_paper_id_docx} docx <base64...>",
+        client.send(f"PAPER_UPLOAD_FILE_B64 {file_paper_id_docx} docx {docx_b64}"),
+    )
+    _print_exchange(
+        f"PAPER_UPLOAD_FILE_B64 {file_paper_id_rtf} rtf <base64...>",
+        client.send(f"PAPER_UPLOAD_FILE_B64 {file_paper_id_rtf} rtf {rtf_b64}"),
+    )
+
+    _print_exchange("(切回 admin 会话)", client.use("admin"))
+    _print_exchange(
+        f"READ /papers/{file_paper_id_docx}/current.docx",
+        client.send(f"READ /papers/{file_paper_id_docx}/current.docx"),
+    )
+    _print_exchange(
+        f"READ /papers/{file_paper_id_rtf}/current.rtf",
+        client.send(f"READ /papers/{file_paper_id_rtf}/current.rtf"),
+    )
+
+    # 3) EDITOR：分配审稿人
+    _print_exchange("LOGIN editor editor123", client.login("editor", "editor123", alias="editor"))
+    _print_exchange(f"ASSIGN_REVIEWER {paper_id} reviewer", client.send(f"ASSIGN_REVIEWER {paper_id} reviewer"))
+
+    # 4) REVIEWER：下载论文并提交审稿
+    _print_exchange("LOGIN reviewer reviewer123", client.login("reviewer", "reviewer123", alias="reviewer"))
+    _print_exchange(f"PAPER_DOWNLOAD {paper_id}", client.send(f"PAPER_DOWNLOAD {paper_id}"))
+    _print_exchange(f"REVIEW_SUBMIT {paper_id} <review>", client.send(f"REVIEW_SUBMIT {paper_id} looks_good"))
+    _print_exchange(f"STATUS {paper_id}", client.send(f"STATUS {paper_id}"))
+
+    # 5) EDITOR：最终决定
+    _print_exchange("(切回 editor 会话)", client.use("editor"))
+    _print_exchange(f"DECIDE {paper_id} ACCEPT", client.send(f"DECIDE {paper_id} ACCEPT"))
+    _print_exchange(f"STATUS {paper_id}", client.send(f"STATUS {paper_id}"))
+
+    # 6) AUTHOR：下载审稿意见
+    _print_exchange("(切回 author 会话)", client.use("author"))
+    _print_exchange(f"REVIEWS_DOWNLOAD {paper_id}", client.send(f"REVIEWS_DOWNLOAD {paper_id}"))
+
+    print("\n" + "=" * 60)
+    print("演示完成：以上已展示 PWD/LS/TREE 以及主流命令输出。")
+    print("=" * 60)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="server 手动测试客户端（全中文）")
     parser.add_argument("--host", default="localhost", help="server 地址")
     parser.add_argument("--port", type=int, default=8080, help="server 端口")
     parser.add_argument("--timeout", type=float, default=5.0, help="socket 超时（秒）")
     parser.add_argument("--retries", type=int, default=3, help="连接失败重试次数")
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="自动化演示/冒烟测试：跑 PWD/LS/TREE 等主流命令并展示输出（不进入交互模式）",
+    )
     args = parser.parse_args()
 
     cfg = ClientConfig(host=args.host, port=args.port, timeout_sec=args.timeout, retries=args.retries)
     client = ServerClient(cfg)
+    if args.smoke:
+        return run_smoke_demo(client)
     return run_interactive_shell(client)
 
 

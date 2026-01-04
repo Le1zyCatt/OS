@@ -68,7 +68,7 @@ void ProtocolFactory::handleRequest(socket_t clientSocket) {
     
     // 循环读取直到连接关闭或没有更多数据
     while (true) {
-        ssize_t bytesRecv = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+        int bytesRecv = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
         
         if (bytesRecv < 0) {
             std::cerr << "Recv failed: " << get_socket_error_string() << std::endl;
@@ -118,7 +118,7 @@ void ProtocolFactory::handleRequest(socket_t clientSocket) {
 
     // 5. 将响应发回客户端
     if (!response.empty()) {
-        ssize_t sent = send(clientSocket, response.c_str(), static_cast<int>(response.length()), 0);
+        int sent = send(clientSocket, response.c_str(), static_cast<int>(response.length()), 0);
         if (sent < 0) {
             std::cerr << "Failed to send response: " << get_socket_error_string() << std::endl;
         } else {

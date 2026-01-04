@@ -8,6 +8,7 @@
 #include <functional>
 #include <atomic>
 #include <iostream>
+#include <sstream>
 
 /**
  * ThreadPool - 线程池实现
@@ -38,11 +39,14 @@ public:
             numThreads = 1;  // 至少一个线程
         }
         
-        std::cout << "ThreadPool: 初始化 " << numThreads << " 个工作线程";
-        if (maxQueueSize > 0) {
-            std::cout << "，最大队列大小: " << maxQueueSize;
+        {
+            std::ostringstream oss;
+            oss << "ThreadPool: 初始化 " << numThreads << " 个工作线程";
+            if (maxQueueSize > 0) {
+                oss << "，最大队列大小: " << maxQueueSize;
+            }
+            logLine(std::cout, oss.str());
         }
-        std::cout << std::endl;
         
         // 创建工作线程
         for (size_t i = 0; i < numThreads; ++i) {
@@ -79,8 +83,10 @@ public:
             
             // 检查队列是否已满
             if (m_maxQueueSize > 0 && m_tasks.size() >= m_maxQueueSize) {
-                std::cerr << "ThreadPool: 任务队列已满 (" << m_tasks.size() 
-                         << "/" << m_maxQueueSize << ")，拒绝新任务" << std::endl;
+                std::ostringstream oss;
+                oss << "ThreadPool: 任务队列已满 (" << m_tasks.size()
+                    << "/" << m_maxQueueSize << ")，拒绝新任务";
+                logLine(std::cerr, oss.str());
                 return false;
             }
             
@@ -117,7 +123,7 @@ public:
             }
         }
         
-        std::cout << "ThreadPool: 已关闭" << std::endl;
+        logLine(std::cout, "ThreadPool: 已关闭");
     }
 
     /**
@@ -143,11 +149,22 @@ public:
     }
 
 private:
+    inline static std::mutex s_logMutex;
+
+    static void logLine(std::ostream& os, const std::string& line) {
+        std::lock_guard<std::mutex> lock(s_logMutex);
+        os << line << std::endl;
+    }
+
     /**
      * 工作线程函数
      */
     void workerThread(size_t threadId) {
-        std::cout << "ThreadPool: 工作线程 " << threadId << " 已启动" << std::endl;
+        {
+            std::ostringstream oss;
+            oss << "ThreadPool: 工作线程 " << threadId << " 已启动";
+            logLine(std::cout, oss.str());
+        }
         
         while (true) {
             std::function<void()> task;
@@ -178,15 +195,21 @@ private:
                 try {
                     task();
                 } catch (const std::exception& e) {
-                    std::cerr << "ThreadPool: 任务执行异常: " << e.what() << std::endl;
+                    std::ostringstream oss;
+                    oss << "ThreadPool: 任务执行异常: " << e.what();
+                    logLine(std::cerr, oss.str());
                 } catch (...) {
-                    std::cerr << "ThreadPool: 任务执行未知异常" << std::endl;
+                    logLine(std::cerr, "ThreadPool: 任务执行未知异常");
                 }
                 m_activeThreads--;
             }
         }
-        
-        std::cout << "ThreadPool: 工作线程 " << threadId << " 已退出" << std::endl;
+
+        {
+            std::ostringstream oss;
+            oss << "ThreadPool: 工作线程 " << threadId << " 已退出";
+            logLine(std::cout, oss.str());
+        }
     }
 
     std::vector<std::thread> m_workers;           // 工作线程

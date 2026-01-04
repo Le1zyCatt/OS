@@ -16,6 +16,14 @@ public:
                     const std::string& content,
                     std::string& errorMsg);
 
+    // 新增：上传二进制论文文件（pdf/docx/rtf/doc/tex 等）
+    // fileExt 不带点，例如 "pdf"、"docx"。
+    bool uploadPaperFile(const std::string& sessionToken,
+                         const std::string& paperId,
+                         const std::string& fileExt,
+                         const std::string& bytes,
+                         std::string& errorMsg);
+
     bool submitRevision(const std::string& sessionToken,
                         const std::string& paperId,
                         const std::string& content,
