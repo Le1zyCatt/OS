@@ -51,6 +51,15 @@ cmake-build-*/
 out/
 
 ############################
+# Python generated
+############################
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
+
+############################
 # Visual Studio generated
 ############################
 .vs/
@@ -65,5 +74,7 @@ out/
 # Repo-specific generated artifacts
 ############################
 /server/build/
+/server/build_win/
 /filesystem/bin/
 /filesystem/disk/disk.img
+/filesystem/test/output/

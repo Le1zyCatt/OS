@@ -607,6 +607,52 @@ def _print_exchange(command: str, response: str) -> None:
         print(resp)
 
 
+def _colorize_tree_output(resp: str) -> str:
+    """将 server 的 TREE 输出做本地美化（Linux tree 风格 + 分层颜色）。
+
+    说明：
+      - server 返回纯文本；这里仅影响本地展示，不改变协议。
+      - 若终端不支持 ANSI，会看到转义序列；可自行忽略或后续加 --no-color。
+    """
+
+    if not resp.startswith("OK:\n"):
+        return resp
+
+    lines = resp.splitlines()
+    if not lines:
+        return resp
+
+    # ANSI 颜色表（按层循环）
+    palette = ["36", "32", "33", "35", "34", "31"]  # cyan/green/yellow/magenta/blue/red
+    reset = "\x1b[0m"
+
+    out: list[str] = []
+    out.append(lines[0])  # OK:
+
+    for i in range(1, len(lines)):
+        line = lines[i]
+        if not line.strip():
+            out.append(line)
+            continue
+
+        # 根节点（第一行路径）用加粗
+        if i == 1:
+            out.append(f"\x1b[1m{line}{reset}")
+            continue
+
+        # 统计前缀层级：每个层级占 4 个字符（"│   " 或 "    "）
+        depth = 0
+        probe = line
+        while probe.startswith("│   ") or probe.startswith("    "):
+            depth += 1
+            probe = probe[4:]
+
+        color = palette[depth % len(palette)]
+        out.append(f"\x1b[{color}m{line}{reset}")
+
+    return "\n".join(out)
+
+
 def run_smoke_demo(client: ServerClient) -> int:
     """自动化演示/冒烟测试：依次执行一批常用命令并打印输出。
 
@@ -633,10 +679,26 @@ def run_smoke_demo(client: ServerClient) -> int:
     _print_exchange(f"WRITE {demo_root}/hello.txt hello_from_test_client", client.send(f"WRITE {demo_root}/hello.txt hello_from_test_client"))
     _print_exchange(f"READ {demo_root}/hello.txt", client.send(f"READ {demo_root}/hello.txt"))
 
+    # PWD 多级目录效果：CD 进入多层目录后再 PWD
+    deep_dir = f"{demo_root}/lvl1/lvl2/lvl3"
+    _print_exchange(f"MKDIR {demo_root}/lvl1", client.send(f"MKDIR {demo_root}/lvl1"))
+    _print_exchange(f"MKDIR {demo_root}/lvl1/lvl2", client.send(f"MKDIR {demo_root}/lvl1/lvl2"))
+    _print_exchange(f"MKDIR {demo_root}/lvl1/lvl2/lvl3", client.send(f"MKDIR {demo_root}/lvl1/lvl2/lvl3"))
+    _print_exchange(f"CD {demo_root}/lvl1", client.send(f"CD {demo_root}/lvl1"))
+    _print_exchange("PWD", client.send("PWD"))
+    _print_exchange("CD lvl2/lvl3", client.send("CD lvl2/lvl3"))
+    _print_exchange("PWD", client.send("PWD"))
+    _print_exchange("LS", client.send("LS"))
+    _print_exchange("CD /", client.send("CD /"))
+    _print_exchange("PWD", client.send("PWD"))
+
     # 重点：PWD/LS/TREE
     _print_exchange("LS /", client.send("LS /"))
     _print_exchange(f"LS {demo_root}", client.send(f"LS {demo_root}"))
-    _print_exchange("TREE /", client.send("TREE /"))
+    tree_resp = client.send("TREE /")
+    _print_exchange("TREE /", tree_resp)
+    print("\n--- TREE 本地美化（分层颜色）---")
+    print(_colorize_tree_output(tree_resp))
 
     # 常用管理员命令（输出较长，但对验收很有用）
     _print_exchange("USER_LIST", client.send("USER_LIST"))

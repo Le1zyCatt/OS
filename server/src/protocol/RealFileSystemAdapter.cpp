@@ -689,3 +689,36 @@ void RealFileSystemAdapter::getBlockCacheStats(size_t& hits, size_t& misses, siz
     capacity = static_cast<size_t>(c);
 }
 
+bool RealFileSystemAdapter::getFileSystemStats(FileSystemStats& stats, std::string& errorMsg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    // 读取 superblock 获取文件系统信息
+    Superblock sb;
+    read_superblock(m_fd, &sb);
+    
+    stats.block_size = sb.block_size;
+    stats.block_count = sb.block_count;
+    stats.inode_count = sb.inode_count;
+    stats.free_inode_count = sb.free_inode_count;
+    stats.free_block_count = sb.free_block_count;
+    stats.data_block_start = DATA_BLOCK_START;
+    stats.is_real_fs = true;  // 这是真实文件系统
+    
+    // 获取快照数量
+    Snapshot snapshots[MAX_SNAPSHOTS];
+    int count = list_snapshots(m_fd, snapshots, MAX_SNAPSHOTS);
+    if (count < 0) {
+        stats.snapshot_count = 0;
+    } else {
+        int activeCount = 0;
+        for (int i = 0; i < count; ++i) {
+            if (snapshots[i].active) {
+                activeCount++;
+            }
+        }
+        stats.snapshot_count = activeCount;
+    }
+    
+    return true;
+}
+

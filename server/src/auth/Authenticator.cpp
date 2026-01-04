@@ -23,6 +23,7 @@ struct SessionRecord {
     std::string username;
     UserRole role;
     Clock::time_point expiresAt;
+    std::string cwd;
 };
 
 constexpr std::chrono::minutes kSessionTtl{120};
@@ -61,6 +62,7 @@ public:
             username,
             it->second.role,
             Clock::now() + kSessionTtl,
+            "/",
         };
 
         return token;
@@ -114,6 +116,38 @@ public:
         }
 
         return it->second.role;
+    }
+
+    std::string getCwd(const std::string& sessionToken) override {
+        std::scoped_lock lock(m_mutex);
+        auto it = m_sessions.find(sessionToken);
+        if (it == m_sessions.end()) {
+            return "/";
+        }
+        if (Clock::now() > it->second.expiresAt) {
+            m_sessions.erase(it);
+            return "/";
+        }
+        return it->second.cwd.empty() ? "/" : it->second.cwd;
+    }
+
+    bool setCwd(const std::string& sessionToken, const std::string& cwd, std::string& errorMsg) override {
+        std::scoped_lock lock(m_mutex);
+
+        auto it = m_sessions.find(sessionToken);
+        if (it == m_sessions.end()) {
+            errorMsg = "Session not found.";
+            return false;
+        }
+
+        if (Clock::now() > it->second.expiresAt) {
+            m_sessions.erase(it);
+            errorMsg = "Session expired.";
+            return false;
+        }
+
+        it->second.cwd = cwd.empty() ? "/" : cwd;
+        return true;
     }
 
     bool addUser(const std::string& username,

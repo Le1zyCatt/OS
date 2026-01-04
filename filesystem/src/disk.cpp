@@ -1,8 +1,7 @@
 // 在 disk.cpp 中添加以下实现
 #include "../include/disk.h"
 #include "../include/inode.h" 
-#include <unistd.h>
-#include <fcntl.h>
+#include "../include/platform_compat.h"  // 跨平台兼容层（必须在 unistd.h 之前）
 #include <cstring>
 #include <iostream>
 #include <cassert>

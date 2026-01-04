@@ -214,11 +214,11 @@ void BlockCache::print_stats() const {
 
 // ==================== C 接口实现 ====================
 
-void block_cache_init(size_t capacity) {
+void block_cache_init(unsigned long capacity) {
     if (g_block_cache != nullptr) {
         delete g_block_cache;
     }
-    g_block_cache = new BlockCache(capacity);
+    g_block_cache = new BlockCache(static_cast<size_t>(capacity));
 }
 
 void block_cache_destroy() {
@@ -258,12 +258,12 @@ void block_cache_clear() {
     }
 }
 
-void block_cache_get_stats(size_t* hits, size_t* misses, size_t* size, size_t* capacity) {
+void block_cache_get_stats(unsigned long* hits, unsigned long* misses, unsigned long* size, unsigned long* capacity) {
     if (g_block_cache != nullptr) {
-        if (hits) *hits = g_block_cache->get_hits();
-        if (misses) *misses = g_block_cache->get_misses();
-        if (size) *size = g_block_cache->get_size();
-        if (capacity) *capacity = g_block_cache->get_capacity();
+        if (hits) *hits = static_cast<unsigned long>(g_block_cache->get_hits());
+        if (misses) *misses = static_cast<unsigned long>(g_block_cache->get_misses());
+        if (size) *size = static_cast<unsigned long>(g_block_cache->get_size());
+        if (capacity) *capacity = static_cast<unsigned long>(g_block_cache->get_capacity());
     } else {
         if (hits) *hits = 0;
         if (misses) *misses = 0;

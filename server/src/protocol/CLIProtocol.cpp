@@ -59,6 +59,61 @@ std::string normalizePathForCli(std::string path) {
     return path;
 }
 
+std::string normalizeAbsPath(const std::string& input) {
+    std::string path = input;
+    if (path.empty()) return "/";
+    for (auto& c : path) {
+        if (c == '\\') c = '/';
+    }
+    if (path.front() != '/') path.insert(path.begin(), '/');
+
+    std::vector<std::string> stack;
+    stack.reserve(16);
+
+    size_t i = 0;
+    while (i < path.size()) {
+        while (i < path.size() && path[i] == '/') i++;
+        if (i >= path.size()) break;
+        size_t j = i;
+        while (j < path.size() && path[j] != '/') j++;
+        std::string part = path.substr(i, j - i);
+        i = j;
+
+        if (part.empty() || part == ".") continue;
+        if (part == "..") {
+            if (!stack.empty()) stack.pop_back();
+            continue;
+        }
+        stack.push_back(std::move(part));
+    }
+
+    std::string out = "/";
+    for (size_t k = 0; k < stack.size(); k++) {
+        out += stack[k];
+        if (k + 1 < stack.size()) out.push_back('/');
+    }
+    if (out.size() > 1 && out.back() == '/') out.pop_back();
+    return out;
+}
+
+std::string resolvePathFromCwd(const std::string& cwd, const std::string& input) {
+    if (input.empty()) {
+        return normalizeAbsPath(cwd.empty() ? "/" : cwd);
+    }
+
+    std::string p = input;
+    for (auto& c : p) {
+        if (c == '\\') c = '/';
+    }
+    if (!p.empty() && p.front() == '/') {
+        return normalizeAbsPath(p);
+    }
+
+    std::string base = normalizeAbsPath(cwd.empty() ? "/" : cwd);
+    if (base.size() > 1 && base.back() != '/') base.push_back('/');
+    return normalizeAbsPath(base + p);
+}
+
 // 基础 base64 解码（仅用于测试/CLI，避免引入外部依赖）
 bool base64Decode(const std::string& in, std::string& out, std::string& errorMsg) {
     static constexpr unsigned char kInvalid = 0xFF;
@@ -202,12 +257,13 @@ bool validateByExt(const std::string& ext, const std::string& bytes, std::string
     return false;
 }
 
-bool treeWalk(FSProtocol* fs,
-              const std::string& path,
-              int depth,
-              std::ostringstream& oss,
-              size_t& emitted,
-              std::string& errorMsg) {
+bool treeWalkLinux(FSProtocol* fs,
+                   const std::string& path,
+                   int depth,
+                   const std::string& prefix,
+                   std::ostringstream& oss,
+                   size_t& emitted,
+                   std::string& errorMsg) {
     if (depth > kMaxTreeDepth) return true;
     if (emitted >= kMaxTreeEntries) return true;
 
@@ -218,18 +274,23 @@ bool treeWalk(FSProtocol* fs,
     std::vector<std::string> entries;
     if (!fs->listDirectory(path, entries, errorMsg)) return false;
 
-    for (const auto& e : entries) {
+    for (size_t idx = 0; idx < entries.size(); idx++) {
         if (emitted >= kMaxTreeEntries) break;
-        for (int i = 0; i < depth; i++) oss << "  ";
-        oss << e << "\n";
+        const bool isLast = (idx + 1 == entries.size());
+        const auto& e = entries[idx];
+
+        oss << prefix;
+        oss << (isLast ? "└── " : "├── ");
+        oss << e;
+        oss << "\n";
         emitted++;
 
         if (!e.empty() && e.back() == '/') {
             std::string child = path;
             if (child.size() > 1 && child.back() != '/') child.push_back('/');
             child += e.substr(0, e.size() - 1);
-            // 递归
-            if (!treeWalk(fs, child, depth + 1, oss, emitted, errorMsg)) return false;
+            const std::string nextPrefix = prefix + (isLast ? "    " : "│   ");
+            if (!treeWalkLinux(fs, child, depth + 1, nextPrefix, oss, emitted, errorMsg)) return false;
         }
     }
     return true;
@@ -296,7 +357,7 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
         const UserRole role = m_auth->getUserRole(sessionId);
         std::ostringstream oss;
         oss << "OK: ROLE=" << roleToString(role) << "\n";
-        oss << "Common: READ WRITE MKDIR PWD LS TREE STATUS PAPER_DOWNLOAD\n";
+        oss << "Common: READ WRITE MKDIR CD PWD LS TREE STATUS PAPER_DOWNLOAD\n";
         if (role == UserRole::AUTHOR) oss << "Author: PAPER_UPLOAD PAPER_UPLOAD_FILE_B64 PAPER_UPLOAD_PDF_B64 PAPER_REVISE REVIEWS_DOWNLOAD\n";
         if (role == UserRole::REVIEWER) oss << "Reviewer: REVIEW_SUBMIT\n";
         if (role == UserRole::EDITOR) oss << "Editor: ASSIGN_REVIEWER DECIDE REVIEWS_DOWNLOAD\n";
@@ -412,7 +473,8 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             return false;
         }
 
-        if (m_fs->readFile(path, content, errorMsg)) {
+        const std::string normalizedPath = resolvePathFromCwd(m_auth->getCwd(sessionId), path);
+        if (m_fs->readFile(normalizedPath, content, errorMsg)) {
             response = "OK: " + content;
         } else {
             response = "ERROR: " + errorMsg;
@@ -439,7 +501,8 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             return false;
         }
 
-        if (m_fs->writeFile(path, content, errorMsg)) {
+        const std::string normalizedPath = resolvePathFromCwd(m_auth->getCwd(sessionId), path);
+        if (m_fs->writeFile(normalizedPath, content, errorMsg)) {
             response = "OK: File written.";
         } else {
             response = "ERROR: " + errorMsg;
@@ -463,11 +526,45 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             return false;
         }
 
-        if (m_fs->createDirectory(path, errorMsg)) {
+        const std::string normalizedPath = resolvePathFromCwd(m_auth->getCwd(sessionId), path);
+        if (m_fs->createDirectory(normalizedPath, errorMsg)) {
             response = "OK: Directory created.";
         } else {
             response = "ERROR: " + errorMsg;
         }
+    } else if (cmd == "CD") {
+        std::string sessionId, path;
+        ss >> sessionId >> path;
+        if (sessionId.empty() || path.empty()) {
+            response = "ERROR: Usage: CD <sessionToken> <path>";
+            return false;
+        }
+        std::string username;
+        if (!m_auth->validateSession(sessionId, username, errorMsg)) {
+            response = "ERROR: Not authenticated: " + errorMsg;
+            return false;
+        }
+        const UserRole role = m_auth->getUserRole(sessionId);
+        if (!m_perm->hasPermission(role, Permission::READ_FILE)) {
+            response = "ERROR: Permission denied.";
+            return false;
+        }
+
+        const std::string target = resolvePathFromCwd(m_auth->getCwd(sessionId), path);
+        bool isDir = false;
+        if (!m_fs->isDirectory(target, isDir, errorMsg)) {
+            response = "ERROR: " + errorMsg;
+            return false;
+        }
+        if (!isDir) {
+            response = "ERROR: Not a directory.";
+            return false;
+        }
+        if (!m_auth->setCwd(sessionId, target, errorMsg)) {
+            response = "ERROR: " + errorMsg;
+            return false;
+        }
+        response = "OK: " + target;
     } else if (cmd == "PWD") {
         std::string sessionId;
         ss >> sessionId;
@@ -480,8 +577,7 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             response = "ERROR: Not authenticated: " + errorMsg;
             return false;
         }
-        // 当前协议为“一条命令一个连接”，没有 CD 语义；PWD 固定返回根目录。
-        response = "OK: /";
+        response = "OK: " + m_auth->getCwd(sessionId);
     } else if (cmd == "LS") {
         std::string sessionId, path;
         ss >> sessionId;
@@ -501,7 +597,7 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             return false;
         }
 
-        const std::string normPath = normalizePathForCli(path);
+        const std::string normPath = resolvePathFromCwd(m_auth->getCwd(sessionId), path);
         std::vector<std::string> entries;
         if (!m_fs->listDirectory(normPath, entries, errorMsg)) {
             response = "ERROR: " + errorMsg;
@@ -530,7 +626,7 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             return false;
         }
 
-        const std::string normPath = normalizePathForCli(path);
+        const std::string normPath = resolvePathFromCwd(m_auth->getCwd(sessionId), path);
         bool isDir = false;
         if (!m_fs->isDirectory(normPath, isDir, errorMsg)) {
             response = "ERROR: " + errorMsg;
@@ -539,22 +635,41 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
 
         std::ostringstream oss;
         oss << "OK:\n";
-        oss << normPath;
-        oss << (isDir ? "/" : "") << "\n";
+        if (isDir) {
+            oss << (normPath == "/" ? "/" : (normPath + "/"));
+        } else {
+            oss << normPath;
+        }
+        oss << "\n";
         size_t emitted = 0;
         if (isDir) {
-            if (!treeWalk(m_fs, normPath, 1, oss, emitted, errorMsg)) {
+            if (!treeWalkLinux(m_fs, normPath, 1, "", oss, emitted, errorMsg)) {
                 response = "ERROR: " + errorMsg;
                 return false;
             }
         }
         response = oss.str();
     } else if (cmd == "BACKUP" || cmd == "BACKUP_CREATE") {
-        std::string sessionId, name;
-        ss >> sessionId >> name;
+        // 支持两种格式:
+        // BACKUP_CREATE <token> <name>
+        // BACKUP_CREATE <token> <path> <name> (path 被忽略，因为快照是全局的)
+        std::string sessionId, arg1, arg2;
+        ss >> sessionId >> arg1 >> arg2;
         if (sessionId.empty()) {
             response = "ERROR: Usage: BACKUP_CREATE <sessionToken> [name]";
             return false;
+        }
+        // 如果有两个额外参数，第一个是 path（被忽略），第二个是 name
+        // 如果只有一个额外参数且不是 "/" 开头，视为 name
+        std::string name;
+        if (!arg2.empty()) {
+            name = arg2;  // 有两个参数，第二个是 name
+        } else if (!arg1.empty() && arg1[0] != '/') {
+            name = arg1;  // 只有一个参数且不是路径，是 name
+        } else if (!arg1.empty() && arg1 == "/") {
+            name = "";    // 只有路径，name 为空，自动生成
+        } else {
+            name = arg1;  // 可能是空的
         }
         // name 为空时由 flow 生成默认名称
         // 快照是全局的，不需要路径参数
@@ -586,8 +701,12 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             return false;
         }
         std::ostringstream oss;
-        oss << "OK:";
-        for (const auto& n : names) oss << " " << n;
+        if (names.empty()) {
+            oss << "OK: (no snapshots)";
+        } else {
+            oss << "OK:";
+            for (const auto& n : names) oss << " " << n;
+        }
         response = oss.str();
     } else if (cmd == "BACKUP_RESTORE") {
         std::string sessionId, name;
@@ -628,7 +747,42 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             response = "ERROR: Permission denied.";
             return false;
         }
-        response = "OK: Server running. (FS stats not available via interface yet)";
+        
+        // 获取文件系统统计信息
+        FileSystemStats stats;
+        if (m_fs->getFileSystemStats(stats, errorMsg)) {
+            std::ostringstream oss;
+            oss << "OK: Server running.\n";
+            oss << "FS_TYPE=" << (stats.is_real_fs ? "REAL" : "SIMULATED") << "\n";
+            oss << "BLOCK_SIZE=" << stats.block_size << "\n";
+            oss << "BLOCK_COUNT=" << stats.block_count << "\n";
+            oss << "INODE_COUNT=" << stats.inode_count << "\n";
+            oss << "FREE_INODE_COUNT=" << stats.free_inode_count << "\n";
+            oss << "FREE_BLOCK_COUNT=" << stats.free_block_count << "\n";
+            oss << "DATA_BLOCK_START=" << stats.data_block_start << "\n";
+            oss << "SNAPSHOT_COUNT=" << stats.snapshot_count;
+            response = oss.str();
+        } else {
+            response = "OK: Server running. (FS stats not available: " + errorMsg + ")";
+        }
+    } else if (cmd == "FS_INFO") {
+        // 无需认证即可获取文件系统基本信息
+        FileSystemStats stats;
+        if (m_fs->getFileSystemStats(stats, errorMsg)) {
+            std::ostringstream oss;
+            oss << "OK:\n";
+            oss << "FS_TYPE=" << (stats.is_real_fs ? "REAL" : "SIMULATED") << "\n";
+            oss << "BLOCK_SIZE=" << stats.block_size << "\n";
+            oss << "BLOCK_COUNT=" << stats.block_count << "\n";
+            oss << "INODE_COUNT=" << stats.inode_count << "\n";
+            oss << "FREE_INODE_COUNT=" << stats.free_inode_count << "\n";
+            oss << "FREE_BLOCK_COUNT=" << stats.free_block_count << "\n";
+            oss << "DATA_BLOCK_START=" << stats.data_block_start << "\n";
+            oss << "SNAPSHOT_COUNT=" << stats.snapshot_count;
+            response = oss.str();
+        } else {
+            response = "ERROR: " + errorMsg;
+        }
     } else if (cmd == "SUBMIT_REVIEW") {
         std::string sessionId, operation, path;
         ss >> sessionId >> operation >> path;

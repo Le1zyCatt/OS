@@ -7,11 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 查找 src 目录下的所有 .cpp 源文件
 file(GLOB_RECURSE CPP_FILES "src/*.cpp")
 
-# 是否使用真实 filesystem 模块（Windows/MSVC 下默认关闭，因为 filesystem 源码依赖 unistd.h）
+# 是否使用真实 filesystem 模块
+# 现在 Windows 和 Linux 都可以使用真实文件系统，通过 platform_compat.h 提供跨平台支持
 option(USE_REAL_FILESYSTEM "Build with real filesystem module" ON)
-if(MSVC)
-    set(USE_REAL_FILESYSTEM OFF)
-endif()
 
 # 添加 filesystem 模块的源文件
 set(FS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../filesystem")

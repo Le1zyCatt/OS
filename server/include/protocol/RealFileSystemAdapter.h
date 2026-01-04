@@ -47,6 +47,9 @@ public:
     bool listDirectory(const std::string& path, std::vector<std::string>& entries, std::string& errorMsg) override;
     bool isDirectory(const std::string& path, bool& isDirOut, std::string& errorMsg) override;
 
+    // 获取文件系统统计信息
+    bool getFileSystemStats(FileSystemStats& stats, std::string& errorMsg) override;
+
     // 新增：获取论文访问统计
     size_t getPaperAccessCount(const std::string& paperId) const;
     

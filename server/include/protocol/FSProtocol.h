@@ -2,6 +2,18 @@
 #include <string>
 #include <vector>
 
+// 文件系统统计信息结构
+struct FileSystemStats {
+    int block_size;         // 块大小 (字节)
+    int block_count;        // 总块数
+    int inode_count;        // 总 inode 数
+    int free_inode_count;   // 空闲 inode 数
+    int free_block_count;   // 空闲块数
+    int data_block_start;   // 数据块起始位置
+    int snapshot_count;     // 当前快照数量
+    bool is_real_fs;        // 是否是真实文件系统（非模拟）
+};
+
 // 【关键】标注所有需 FileSystem 提供的 API
 // 注意：此头文件不包含任何 FS 实现，仅定义接口
 class FSProtocol {
@@ -41,4 +53,5 @@ public:
     virtual bool listDirectory(const std::string& path, std::vector<std::string>& entries, std::string& errorMsg) = 0;
     // 判断 path 是否为目录；若 path 不存在或读取失败，返回 false 并填写 errorMsg。
     virtual bool isDirectory(const std::string& path, bool& isDirOut, std::string& errorMsg) = 0;
-};
+    // 【新增】获取文件系统统计信息
+    virtual bool getFileSystemStats(FileSystemStats& stats, std::string& errorMsg) = 0;};

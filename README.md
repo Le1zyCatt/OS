@@ -236,13 +236,40 @@ OS/
 
 ## 🚀 快速开始
 
+### Windows 原生：一键启动（真实文件系统 + Web 控制台）
+
+在仓库根目录打开 PowerShell：
+
+```powershell
+# Windows 原生模式（自动编译 C++ 服务器）
+powershell -ExecutionPolicy Bypass -File .\start_realfs_web.ps1
+
+# 或使用 WSL 模式（需要已配置 WSL）
+powershell -ExecutionPolicy Bypass -File .\start_realfs_web.ps1 -UseWSL
+```
+
+脚本会：
+- 自动编译 Windows 原生 C++ 服务器（使用真实文件系统）
+- 启动服务器监听 `8080` 端口
+- 启动 Web 控制台监听 `5000` 端口
+- 自动打开浏览器 `http://127.0.0.1:5000`
+
+### Web 控制台功能
+
+- **文件系统视图**：实时显示真实的文件系统统计信息（磁盘使用率、块数、inode 数等）
+- **快照管理**：通过 Web 界面一键创建和恢复快照
+- **命令终端**：支持所有 CLI 命令的图形化界面
+
 ### 环境要求
 
-- **编译器**：支持 C++11 的编译器（GCC 4.8+、Clang 3.4+、MSVC 2015+）
-- **构建工具**：CMake 3.10+（Client/Server）、Make（FileSystem）
-- **操作系统**：Linux、macOS、Windows
+- **编译器**：支持 C++17 的编译器
+  - Windows：Visual Studio 2019+ 或 MinGW-w64
+  - Linux：GCC 7+ 或 Clang 5+
+- **构建工具**：CMake 3.10+
+- **Python**：Python 3.7+（用于 Web 控制台）
+- **操作系统**：Windows 10+、Linux、macOS
 
-### 1. 编译文件系统
+### 1. 编译文件系统（Linux/WSL）
 
 ```bash
 # 进入文件系统目录

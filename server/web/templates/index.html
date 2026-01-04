@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>论文审稿系统 - 控制台</title>
+    <link rel="stylesheet" href="/static/css/style.css?v=20260104">
+</head>
+<body>
+    <div class="main-container">
+        <!-- 左侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">APS</div>
+                <h1>论文审稿系统</h1>
+            </div>
+
+            <!-- 用户身份选择 -->
+            <div class="user-section">
+                <div class="section-title">👤 用户身份 <span class="hint">(点击登录)</span></div>
+                <div class="user-cards">
+                    <div class="user-card" data-user="admin" data-pass="admin123" data-role="ADMIN">
+                        <div class="user-avatar admin">A</div>
+                        <div class="user-info">
+                            <div class="user-name">admin</div>
+                            <div class="user-role">管理员</div>
+                            
+                        </div>
+                        <div class="user-status" id="status-admin"></div>
+                    </div>
+                    <div class="user-card" data-user="editor" data-pass="editor123" data-role="EDITOR">
+                        <div class="user-avatar editor">E</div>
+                        <div class="user-info">
+                            <div class="user-name">editor</div>
+                            <div class="user-role">编辑</div>
+                            
+                        </div>
+                        <div class="user-status" id="status-editor"></div>
+                    </div>
+                    <div class="user-card" data-user="reviewer" data-pass="reviewer123" data-role="REVIEWER">
+                        <div class="user-avatar reviewer">R</div>
+                        <div class="user-info">
+                            <div class="user-name">reviewer</div>
+                            <div class="user-role">审稿人</div>
+                            
+                        </div>
+                        <div class="user-status" id="status-reviewer"></div>
+                    </div>
+                    <div class="user-card" data-user="author" data-pass="author123" data-role="AUTHOR">
+                        <div class="user-avatar author">U</div>
+                        <div class="user-info">
+                            <div class="user-name">author</div>
+                            <div class="user-role">作者</div>
+                          
+                        </div>
+                        <div class="user-status" id="status-author"></div>
+                    </div>
+                </div>
+            </div>
+
+
+
+            <!-- 视图切换 -->
+            <div class="view-section">
+                <div class="section-title"> 视图</div>
+                <div class="view-tabs">
+                    <button class="view-tab active" data-view="terminal">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 17l6-6-6-6M12 19h8"/>
+                        </svg>
+                        命令终端
+                    </button>
+                    <button class="view-tab" data-view="filesystem">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        文件系统
+                    </button>
+                    <button class="view-tab" data-view="snapshot">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                        快照管理
+                    </button>
+                </div>
+            </div>
+
+            <!-- 快照列表 -->
+            <div class="snapshots-section">
+                <div class="section-title"> 快照列表</div>
+                <div class="snapshots-list" id="snapshotsList">
+                    <!-- 动态填充 -->
+                    <div class="snapshot-item" style="color: var(--text-muted); justify-content: center;">
+                        暂无快照
+                    </div>
+                </div>
+            </div>
+
+            <!-- 一键测试按钮 -->
+            <div class="test-section">
+                <button class="btn-test" id="runAllTestsBtn">
+                    🚀 一键测试所有功能
+                </button>
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 顶部状态栏 -->
+            <div class="top-bar">
+                <div class="connection-status">
+                    <div class="status-dot" id="connectionDot"></div>
+                    <span class="server-info" id="serverInfo">localhost:8080</span>
+                </div>
+                <div class="current-path" id="currentPath">/</div>
+                <button class="btn-toggle-commands" id="toggleCommandsBtn" title="显示/隐藏命令列表">
+                    📋 命令
+                </button>
+            </div>
+
+            <!-- 内容区域 -->
+            <div class="content-area">
+                <!-- CLI 终端视图 -->
+                <div class="terminal-view active" id="terminalView">
+                    <div class="terminal-output" id="terminalOutput">
+                        <div class="terminal-line info">╭───────────────────────────────────────────────────────────────╮</div>
+                        <div class="terminal-line info">│       学术论文审稿系统 - Academic Paper Review System        │</div>
+                        <div class="terminal-line info">│───────────────────────────────────────────────────────────────│</div>
+                        <div class="terminal-line info">│  基于 C++ 实现的完整学术论文同行评审系统                     │</div>
+                        <div class="terminal-line info">│  支持多用户角色、并发访问、文件系统管理和快照备份             │</div>
+                        <div class="terminal-line info">╰───────────────────────────────────────────────────────────────╯</div>
+                        <div class="terminal-line"></div>
+                        <div class="terminal-line warning">提示：点击左侧用户卡片登录，或输入 LOGIN &lt;user&gt; &lt;pass&gt;</div>
+                        <div class="terminal-line warning">输入 HELP 查看可用命令列表</div>
+                        <div class="terminal-line"></div>
+                    </div>
+                    <div class="terminal-input-container">
+                        <span class="input-prompt" id="inputPrompt">[未登录]$</span>
+                        <input type="text" class="terminal-input" id="terminalInput" 
+                               placeholder="输入命令..." autocomplete="off" spellcheck="false">
+                    </div>
+                </div>
+
+                <!-- 文件系统视图 -->
+                <div class="fs-view" id="filesystemView">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">磁盘大小</div>
+                            <div class="stat-value" id="statDiskSize">8<span class="stat-unit">MB</span></div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">块大小</div>
+                            <div class="stat-value" id="statBlockSize">1<span class="stat-unit">KB</span></div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">总块数</div>
+                            <div class="stat-value" id="statTotalBlocks">8192</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">可用数据块</div>
+                            <div class="stat-value" id="statFreeBlocks">8069</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">已用块</div>
+                            <div class="stat-value" id="statUsedBlocks">123</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">空闲 Inode</div>
+                            <div class="stat-value" id="statFreeInodes">--</div>
+                        </div>
+                    </div>
+
+                    <div class="charts-section">
+                        <div class="chart-card">
+                            <div class="chart-title">磁盘空间使用</div>
+                            <div class="disk-usage-bar" id="diskUsageBar">
+                                <div class="usage-segment system" style="width: 1.5%">系统</div>
+                                <div class="usage-segment used" style="width: 0%">已用</div>
+                                <div class="usage-segment free" style="width: 98.5%">可用</div>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin-top: 12px; font-size: 11px; color: var(--text-muted);">
+                                <span>📦 系统保留: 123 块</span>
+                                <span>💾 数据块: 8069 块</span>
+                            </div>
+                        </div>
+                        <div class="chart-card">
+                            <div class="chart-title">缓存统计</div>
+                            <div class="stats-grid" style="margin-bottom: 0;">
+                                <div class="stat-card" style="padding: 12px;">
+                                    <div class="stat-label">缓存命中</div>
+                                    <div class="stat-value" id="cacheHits" style="font-size: 18px;">--</div>
+                                </div>
+                                <div class="stat-card" style="padding: 12px;">
+                                    <div class="stat-label">缓存未命中</div>
+                                    <div class="stat-value" id="cacheMisses" style="font-size: 18px;">--</div>
+                                </div>
+                                <div class="stat-card" style="padding: 12px;">
+                                    <div class="stat-label">命中率</div>
+                                    <div class="stat-value" id="cacheHitRate" style="font-size: 18px;">--%</div>
+                                </div>
+                                <div class="stat-card" style="padding: 12px;">
+                                    <div class="stat-label">缓存大小</div>
+                                    <div class="stat-value" id="cacheSize" style="font-size: 18px;">--/64</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chart-card">
+                        <div class="chart-title">目录结构</div>
+                        <div class="directory-tree" id="directoryTree">
+                            <div style="color: var(--text-muted);">加载中...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 快照管理视图 -->
+                <div class="snapshot-view" id="snapshotView">
+                    <div class="snapshot-toolbar">
+                        <h2>📸 快照管理</h2>
+                        <button class="btn-primary" id="createSnapshotBtn">
+                            <span>+</span> 创建快照
+                        </button>
+                    </div>
+                    <div class="snapshot-grid" id="snapshotGrid">
+                        <div class="snapshot-card-empty">
+                            <div class="empty-icon">📷</div>
+                            <div class="empty-text">暂无快照</div>
+                            <div class="empty-hint">点击上方按钮创建第一个快照</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右侧命令面板 -->
+                <aside class="commands-panel" id="commandsPanel">
+                    <div class="commands-panel-header">
+                        <span>📋 可用命令（点击复制到终端）</span>
+                        <button class="btn-close-panel" id="closePanelBtn">✕</button>
+                    </div>
+                    <div class="commands-panel-content">
+                        <!-- 通用命令 -->
+                        <div class="command-group">
+                            <div class="command-group-title">通用</div>
+                            <div class="command-item" data-cmd="HELP">HELP</div>
+                            <div class="command-item" data-cmd="LOGOUT">LOGOUT</div>
+                        </div>
+
+                        <!-- 文件操作 -->
+                        <div class="command-group">
+                            <div class="command-group-title">文件操作</div>
+                            <div class="command-item" data-cmd="LS /">LS /</div>
+                            <div class="command-item" data-cmd="PWD">PWD</div>
+                            <div class="command-item" data-cmd="CD /">CD /</div>
+                            <div class="command-item" data-cmd="TREE /">TREE /</div>
+                            <div class="command-item" data-cmd="MKDIR /test">MKDIR /test</div>
+                            <div class="command-item" data-cmd="WRITE /test/hello.txt hello_world">WRITE /test/hello.txt ...</div>
+                            <div class="command-item" data-cmd="READ /test/hello.txt">READ /test/hello.txt</div>
+                            <div class="command-item" data-cmd="READ /papers/paper001/current.pdf">READ /papers/.../current.pdf</div>
+                            <div class="command-item" data-cmd="READ /papers/paper001/current.docx">READ /papers/.../current.docx</div>
+                            <div class="command-item" data-cmd="READ /papers/paper001/current.rtf">READ /papers/.../current.rtf</div>
+                        </div>
+
+                        <!-- 管理员命令 -->
+                        <div class="command-group" data-role="ADMIN">
+                            <div class="command-group-title">🔑 管理员</div>
+                            <div class="command-item" data-cmd="USER_LIST">USER_LIST</div>
+                            <div class="command-item" data-cmd="USER_ADD testuser pass123 AUTHOR">USER_ADD testuser ...</div>
+                            <div class="command-item" data-cmd="USER_DEL testuser">USER_DEL testuser</div>
+                            <div class="command-item" data-cmd="SYSTEM_STATUS">SYSTEM_STATUS</div>
+                            <div class="command-item" data-cmd="CACHE_STATS">CACHE_STATS</div>
+                            <div class="command-item" data-cmd="CACHE_CLEAR">CACHE_CLEAR</div>
+                            <div class="command-item" data-cmd="BACKUP_CREATE / snapshot_test">BACKUP_CREATE / ...</div>
+                            <div class="command-item" data-cmd="BACKUP_LIST">BACKUP_LIST</div>
+                            <div class="command-item" data-cmd="BACKUP_RESTORE snapshot_test">BACKUP_RESTORE ...</div>
+                        </div>
+
+                        <!-- 编辑命令 -->
+                        <div class="command-group" data-role="EDITOR">
+                            <div class="command-group-title">📝 编辑</div>
+                            <div class="command-item" data-cmd="ASSIGN_REVIEWER paper001 reviewer">ASSIGN_REVIEWER ...</div>
+                            <div class="command-item" data-cmd="DECIDE paper001 ACCEPT">DECIDE paper001 ACCEPT</div>
+                            <div class="command-item" data-cmd="DECIDE paper001 REJECT">DECIDE paper001 REJECT</div>
+                            <div class="command-item" data-cmd="STATUS paper001">STATUS paper001</div>
+                            <div class="command-item" data-cmd="REVIEWS_DOWNLOAD paper001">REVIEWS_DOWNLOAD ...</div>
+                        </div>
+
+                        <!-- 审稿人命令 -->
+                        <div class="command-group" data-role="REVIEWER">
+                            <div class="command-group-title">👁 审稿人</div>
+                            <div class="command-item" data-cmd="PAPER_DOWNLOAD paper001">PAPER_DOWNLOAD ...</div>
+                            <div class="command-item" data-cmd="REVIEW_SUBMIT paper001 looks_good_recommend_accept">REVIEW_SUBMIT ...</div>
+                            <div class="command-item" data-cmd="STATUS paper001">STATUS paper001</div>
+                        </div>
+
+                        <!-- 作者命令 -->
+                        <div class="command-group" data-role="AUTHOR">
+                            <div class="command-group-title">✍ 作者</div>
+                            <div class="command-item" data-cmd="PAPER_UPLOAD paper001 This_is_my_paper_content">PAPER_UPLOAD ...</div>
+                            <div class="command-item" data-cmd="PAPER_UPLOAD_FILE_B64 paper001 pdf <base64...>">PAPER_UPLOAD_FILE_B64 ... pdf</div>
+                            <div class="command-item" data-cmd="PAPER_UPLOAD_FILE_B64 paper001 docx <base64...>">PAPER_UPLOAD_FILE_B64 ... docx</div>
+                            <div class="command-item" data-cmd="PAPER_UPLOAD_FILE_B64 paper001 rtf <base64...>">PAPER_UPLOAD_FILE_B64 ... rtf</div>
+                            <div class="command-item" data-cmd="PAPER_UPLOAD_PDF_B64 paper001 <base64...>">PAPER_UPLOAD_PDF_B64 ...</div>
+                            <div class="command-item" data-cmd="PAPER_REVISE paper001 Revised_paper_content_v2">PAPER_REVISE ...</div>
+                            <div class="command-item" data-cmd="STATUS paper001">STATUS paper001</div>
+                            <div class="command-item" data-cmd="REVIEWS_DOWNLOAD paper001">REVIEWS_DOWNLOAD ...</div>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </main>
+    </div>
+
+    <!-- 登录模态框 -->
+    <div class="modal-overlay" id="loginModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🔐 用户登录</h3>
+                <button class="modal-close" id="closeLoginModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="login-user-info">
+                    <div class="login-avatar" id="loginAvatar">A</div>
+                    <div class="login-username" id="loginUsername">admin</div>
+                    <div class="login-role" id="loginRole">管理员</div>
+                </div>
+                <div class="form-group">
+                    <label for="loginPassword">请输入密码：</label>
+                    <input type="password" id="loginPassword" class="form-input" placeholder="输入密码...">
+                    <div class="password-hint" id="passwordHint">提示: admin123</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" id="cancelLoginBtn">取消</button>
+                <button class="btn-confirm" id="confirmLoginBtn">登录</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js?v=20260104"></script>
+</body>
+</html>

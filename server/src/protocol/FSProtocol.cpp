@@ -220,6 +220,23 @@ public:
         return false;
     }
 
+    bool getFileSystemStats(FileSystemStats& stats, std::string& errorMsg) override {
+        (void)errorMsg;
+        std::scoped_lock lock(m_mutex);
+        
+        // 模拟的文件系统统计信息
+        stats.block_size = 1024;
+        stats.block_count = 8192;
+        stats.inode_count = 1024;
+        stats.free_inode_count = static_cast<int>(1024 - m_files.size() - m_dirs.size());
+        stats.free_block_count = static_cast<int>(8192 - 123 - m_files.size() * 2);  // 粗略估计
+        stats.data_block_start = 123;
+        stats.snapshot_count = static_cast<int>(m_snapshots.size());
+        stats.is_real_fs = false;  // 这是模拟的文件系统
+        
+        return true;
+    }
+
 private:
     struct ReviewRequest {
         std::string operation;
@@ -322,6 +339,10 @@ public:
 
     bool isDirectory(const std::string& path, bool& isDirOut, std::string& errorMsg) override {
         return m_inner->isDirectory(path, isDirOut, errorMsg);
+    }
+
+    bool getFileSystemStats(FileSystemStats& stats, std::string& errorMsg) override {
+        return m_inner->getFileSystemStats(stats, errorMsg);
     }
 
 private:

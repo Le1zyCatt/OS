@@ -31,6 +31,12 @@ public:
     // 获取用户角色
     virtual UserRole getUserRole(const std::string& sessionToken) = 0;
 
+    // --- 会话级当前目录（用于 CD/PWD）---
+    // 说明：server 是“一条命令一个连接”，但 token 代表逻辑会话。
+    //      这里把 cwd 挂在会话上，使得多次命令之间可以共享当前目录。
+    virtual std::string getCwd(const std::string& sessionToken) = 0;
+    virtual bool setCwd(const std::string& sessionToken, const std::string& cwd, std::string& errorMsg) = 0;
+
     // --- 管理员：用户管理 ---
     virtual bool addUser(const std::string& username,
                          const std::string& password,
