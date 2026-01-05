@@ -13,6 +13,10 @@ class APSConsole {
         this.currentPath = '/';
         this.commandHistory = [];
         this.historyIndex = -1;
+
+        // 自动复制（选中后松手）去抖状态
+        this._lastAutoCopiedText = '';
+        this._lastAutoCopyTs = 0;
         
         this.init();
     }
@@ -44,6 +48,10 @@ class APSConsole {
     bindEvents() {
         // 终端输入
         this.terminalInput.addEventListener('keydown', (e) => this.handleInputKeydown(e));
+
+        // 终端/目录树：选中文本松手后自动复制并提示
+        this.enableAutoCopyOnSelection(this.terminalOutput, { successMessage: '✓ 已复制到剪贴板' });
+        this.enableAutoCopyOnSelection(document.getElementById('directoryTree'), { successMessage: '✓ 已复制到剪贴板' });
         
         // 用户卡片点击 - 弹出密码输入模态框
         document.querySelectorAll('.user-card').forEach(card => {
@@ -120,6 +128,44 @@ class APSConsole {
                 this.terminalInput.focus();
             }
         });
+    }
+
+    enableAutoCopyOnSelection(container, { successMessage } = {}) {
+        if (!container) return;
+
+        const handler = () => {
+            const selection = window.getSelection?.();
+            if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
+
+            const text = selection.toString();
+            if (!text || !text.trim()) return;
+
+            const range = selection.getRangeAt(0);
+            const ancestor = range.commonAncestorContainer;
+            if (!container.contains(ancestor)) return;
+            if (selection.anchorNode && !container.contains(selection.anchorNode)) return;
+            if (selection.focusNode && !container.contains(selection.focusNode)) return;
+
+            const now = Date.now();
+            if (this._lastAutoCopiedText === text && (now - this._lastAutoCopyTs) < 800) return;
+            this._lastAutoCopiedText = text;
+            this._lastAutoCopyTs = now;
+
+            if (!navigator.clipboard?.writeText) {
+                this.showCopyToast('自动复制不可用，请按 Ctrl+C');
+                return;
+            }
+
+            navigator.clipboard.writeText(text)
+                .then(() => this.showCopyToast(successMessage || '✓ 已复制'))
+                .catch((err) => {
+                    console.warn('自动复制失败:', err);
+                    this.showCopyToast('自动复制失败，请按 Ctrl+C');
+                });
+        };
+
+        container.addEventListener('mouseup', handler);
+        container.addEventListener('touchend', handler);
     }
     
     toggleCommandsPanel() {
