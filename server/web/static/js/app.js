@@ -237,8 +237,8 @@ class APSConsole {
         // 自动消失
         setTimeout(() => {
             toast.classList.remove('show');
-            setTimeout(() => toast.remove(), 300);
-        }, 2000);
+            setTimeout(() => toast.remove(), 150);
+        }, 1000);
     }
 
     // 清空终端
@@ -440,6 +440,17 @@ class APSConsole {
         
         if (upper === 'LOGOUT') {
             await this.logout();
+            return;
+        }
+        
+        // ASSIGN_RANDOM <paperId> - 随机选择评审人分配
+        if (upper === 'ASSIGN_RANDOM') {
+            const parts = cmd.split(/\s+/);
+            if (parts.length < 2) {
+                this.appendLine('Usage: ASSIGN_RANDOM <paperId>', 'error');
+                return;
+            }
+            await this.assignRandomReviewer(parts[1]);
             return;
         }
         
@@ -758,10 +769,6 @@ class APSConsole {
         this.appendLine('模拟 test_client.py --smoke 的完整命令流程', 'info');
         this.appendLine('', 'info');
         
-        // 使用较短延迟加快测试速度
-        const delay = (ms) => new Promise(r => setTimeout(r, ms));
-        const D = 50;   // 普通命令延迟 (ms)
-        const D2 = 80;  // 重要节点延迟 (ms)
         const timestamp = Date.now();
         const testDir = `/demo_test_web_${timestamp}`;
         const paperId = `demo_paper_${timestamp}`;
@@ -777,47 +784,20 @@ class APSConsole {
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
             
             await this.login('admin', 'admin123');
-            await delay(D);
-            
             await this.printExchange('PWD');
-            await delay(D);
-            
             await this.printExchange(`MKDIR ${testDir}`);
-            await delay(D);
-            
             await this.printExchange(`WRITE ${testDir}/hello.txt Hello_World_from_Web_Console`);
-            await delay(D);
-            
             await this.printExchange(`READ ${testDir}/hello.txt`);
-            await delay(D);
-            
             // 多级目录测试
             await this.printExchange(`MKDIR ${testDir}/lvl1`);
-            await delay(D);
-            
             await this.printExchange(`MKDIR ${testDir}/lvl1/lvl2`);
-            await delay(D);
-            
             await this.printExchange(`MKDIR ${testDir}/lvl1/lvl2/lvl3`);
-            await delay(D);
-            
             await this.printExchange(`WRITE ${testDir}/lvl1/lvl2/deep_file.txt Content_in_deep_directory`);
-            await delay(D);
-            
             await this.printExchange(`CD ${testDir}`);
-            await delay(D);
-            
             await this.printExchange('LS .');
-            await delay(D);
-            
             await this.printExchange('CD /');
-            await delay(D);
-            
             await this.printExchange('LS /');
-            await delay(D);
-            
             await this.printExchange(`TREE ${testDir}`);
-            await delay(D2);
             
             // ==================== 2. ADMIN 管理命令 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -825,13 +805,8 @@ class APSConsole {
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
             
             await this.printExchange('USER_LIST');
-            await delay(D);
-            
             await this.printExchange('SYSTEM_STATUS');
-            await delay(D);
-            
             await this.printExchange('CACHE_STATS');
-            await delay(D2);
             
             // ==================== 3. 快照操作 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -839,23 +814,12 @@ class APSConsole {
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
             
             await this.printExchange(`BACKUP_CREATE / ${snapshotName}`);
-            await delay(D);
-            
             await this.printExchange('BACKUP_LIST');
-            await delay(D);
-            
             // 修改文件后恢复快照
             await this.printExchange(`WRITE ${testDir}/hello.txt Modified_content_after_snapshot`);
-            await delay(D);
-            
             await this.printExchange(`READ ${testDir}/hello.txt`);
-            await delay(D);
-            
             await this.printExchange(`BACKUP_RESTORE ${snapshotName}`);
-            await delay(D);
-            
             await this.printExchange(`READ ${testDir}/hello.txt`);
-            await delay(D2);
             
             // ==================== 4. AUTHOR 论文上传 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -864,13 +828,8 @@ class APSConsole {
             
             await this.logout(true);
             await this.login('author', 'author123');
-            await delay(D);
-            
             await this.printExchange(`PAPER_UPLOAD ${paperId} This_is_a_demo_paper_content_for_academic_review_system_testing`);
-            await delay(D);
-            
             await this.printExchange(`STATUS ${paperId}`);
-            await delay(D2);
 
             // 4.1) AUTHOR：二进制文件上传（base64）
             const pdfBinary = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n";
@@ -882,30 +841,21 @@ class APSConsole {
                 `PAPER_UPLOAD_FILE_B64 ${filePaperPdf} pdf ${pdfB64}`,
                 `PAPER_UPLOAD_FILE_B64 ${filePaperPdf} pdf <base64...>`
             );
-            await delay(D);
-
             await this.printExchange(
                 `PAPER_UPLOAD_FILE_B64 ${filePaperDocx} docx ${docxB64}`,
                 `PAPER_UPLOAD_FILE_B64 ${filePaperDocx} docx <base64...>`
             );
-            await delay(D);
-
             await this.printExchange(
                 `PAPER_UPLOAD_FILE_B64 ${filePaperRtf} rtf ${rtfB64}`,
                 `PAPER_UPLOAD_FILE_B64 ${filePaperRtf} rtf <base64...>`
             );
-            await delay(D2);
 
             // 用 admin 读取并验证（只输出摘要，不打印二进制）
             await this.logout(true);
             await this.login('admin', 'admin123');
-            await delay(D);
             await this.printBinaryRead(`/papers/${filePaperPdf}/current.pdf`, '%PDF-');
-            await delay(D);
             await this.printBinaryRead(`/papers/${filePaperDocx}/current.docx`);
-            await delay(D);
             await this.printBinaryRead(`/papers/${filePaperRtf}/current.rtf`, '{\\rtf1');
-            await delay(D2);
             
             // ==================== 5. EDITOR 分配审稿人 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -914,13 +864,8 @@ class APSConsole {
             
             await this.logout(true);
             await this.login('editor', 'editor123');
-            await delay(D);
-            
             await this.printExchange(`ASSIGN_REVIEWER ${paperId} reviewer`);
-            await delay(D);
-            
             await this.printExchange(`STATUS ${paperId}`);
-            await delay(D2);
             
             // ==================== 6. REVIEWER 审稿流程 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -929,16 +874,9 @@ class APSConsole {
             
             await this.logout(true);
             await this.login('reviewer', 'reviewer123');
-            await delay(D);
-            
             await this.printExchange(`PAPER_DOWNLOAD ${paperId}`);
-            await delay(D);
-            
             await this.printExchange(`REVIEW_SUBMIT ${paperId} Excellent_paper_well_written_recommend_accept`);
-            await delay(D);
-            
             await this.printExchange(`STATUS ${paperId}`);
-            await delay(D2);
             
             // ==================== 7. EDITOR 最终决定 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -947,13 +885,8 @@ class APSConsole {
             
             await this.logout(true);
             await this.login('editor', 'editor123');
-            await delay(D);
-            
             await this.printExchange(`DECIDE ${paperId} ACCEPT`);
-            await delay(D);
-            
             await this.printExchange(`STATUS ${paperId}`);
-            await delay(D2);
             
             // ==================== 8. AUTHOR 查看结果 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -962,10 +895,7 @@ class APSConsole {
             
             await this.logout(true);
             await this.login('author', 'author123');
-            await delay(D);
-            
             await this.printExchange(`REVIEWS_DOWNLOAD ${paperId}`);
-            await delay(D2);
             
             // ==================== 完成 ====================
             this.appendLine('', 'info');
@@ -1128,6 +1058,7 @@ class APSConsole {
 ├────────────────────────────────────────────────────────────┤
 │ 编辑操作 (编辑):                                           │
 │   ASSIGN_REVIEWER <id> <user>   分配审稿人                 │
+│   ASSIGN_RANDOM <id>            随机分配审稿人             │
 │   DECIDE <id> <ACCEPT|REJECT>   做出决定                   │
 ├────────────────────────────────────────────────────────────┤
 │ 管理操作 (管理员):                                         │
@@ -1451,6 +1382,69 @@ class APSConsole {
                 </div>
             </div>
         `).join('');
+    }
+
+    // ASSIGN_RANDOM - 随机从所有评审人中选一个分配给论文
+    async assignRandomReviewer(paperId) {
+        if (!this.activeToken) {
+            this.appendLine('Please login first', 'error');
+            return;
+        }
+        
+        try {
+            // 1. 获取用户列表
+            const listResp = await fetch('/api/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: `USER_LIST ${this.activeToken}` })
+            });
+            const listData = await listResp.json();
+            
+            if (!listData.success || !listData.response) {
+                this.appendLine('ERROR: Failed to get user list', 'error');
+                return;
+            }
+            
+            // 解析评审人列表 (REVIEWER角色)
+            const lines = listData.response.split('\n');
+            const reviewers = [];
+            for (const line of lines) {
+                if (line.includes('REVIEWER')) {
+                    const match = line.match(/^\s*-?\s*(\w+)/); 
+                    if (match && match[1]) {
+                        reviewers.push(match[1]);
+                    }
+                }
+            }
+            
+            if (reviewers.length === 0) {
+                this.appendLine('ERROR: No reviewers found in system', 'error');
+                return;
+            }
+            
+            // 2. 随机选择一个评审人
+            const randomIdx = Math.floor(Math.random() * reviewers.length);
+            const selectedReviewer = reviewers[randomIdx];
+            
+            this.appendLine(`Found ${reviewers.length} reviewer(s): ${reviewers.join(', ')}`, 'info');
+            this.appendLine(`Randomly selected: ${selectedReviewer}`, 'info');
+            
+            // 3. 分配评审人
+            const assignResp = await fetch('/api/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: `ASSIGN_REVIEWER ${this.activeToken} ${paperId} ${selectedReviewer}` })
+            });
+            const assignData = await assignResp.json();
+            
+            if (assignData.success && assignData.response && !assignData.response.startsWith('ERROR')) {
+                this.appendLine(`OK: Assigned reviewer ${selectedReviewer} to paper ${paperId}`, 'success');
+            } else {
+                this.appendLine(`ERROR: ${assignData.response || assignData.error}`, 'error');
+            }
+        } catch (err) {
+            this.appendLine(`ERROR: ${err.message}`, 'error');
+        }
     }
 
     async createSnapshot() {
