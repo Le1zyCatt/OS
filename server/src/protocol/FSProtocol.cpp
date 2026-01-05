@@ -237,6 +237,20 @@ public:
         return true;
     }
 
+    bool assignReviewer(const std::string& reviewId, const std::string& reviewer, std::string& errorMsg) override {
+        std::scoped_lock lock(m_mutex);
+        
+        auto it = m_reviews.find(reviewId);
+        if (it == m_reviews.end()) {
+            errorMsg = "Review not found: " + reviewId;
+            return false;
+        }
+        
+        // 记录审稿人分配（这里简单地存储，实际应用中可能需要更复杂的逻辑）
+        m_reviewAssignments[reviewId] = reviewer;
+        return true;
+    }
+
 private:
     struct ReviewRequest {
         std::string operation;
@@ -250,6 +264,7 @@ private:
     // snapshotName -> (filePath -> content)
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> m_snapshots;
     std::unordered_map<std::string, ReviewRequest> m_reviews;
+    std::unordered_map<std::string, std::string> m_reviewAssignments;  // reviewId -> reviewer
 };
 
 class CachingFSProtocol : public FSProtocol, public ICacheStatsProvider {
@@ -343,6 +358,10 @@ public:
 
     bool getFileSystemStats(FileSystemStats& stats, std::string& errorMsg) override {
         return m_inner->getFileSystemStats(stats, errorMsg);
+    }
+
+    bool assignReviewer(const std::string& reviewId, const std::string& reviewer, std::string& errorMsg) override {
+        return m_inner->assignReviewer(reviewId, reviewer, errorMsg);
     }
 
 private:

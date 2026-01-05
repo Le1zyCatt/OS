@@ -49,6 +49,9 @@ public:
 
     // 获取文件系统统计信息
     bool getFileSystemStats(FileSystemStats& stats, std::string& errorMsg) override;
+    
+    // 分配审稿人
+    bool assignReviewer(const std::string& reviewId, const std::string& reviewer, std::string& errorMsg) override;
 
     // 新增：获取论文访问统计
     size_t getPaperAccessCount(const std::string& paperId) const;
@@ -62,6 +65,15 @@ private:
     
     // 论文访问统计（paperId -> 访问次数）
     mutable std::unordered_map<std::string, size_t> m_paperAccessCounts;
+    
+    // 审核请求存储（reviewId -> 请求信息）
+    struct ReviewRequest {
+        std::string operation;
+        std::string path;
+        std::string user;
+    };
+    std::unordered_map<std::string, ReviewRequest> m_reviews;
+    std::unordered_map<std::string, std::string> m_reviewAssignments;  // reviewId -> reviewer
     
     // 辅助函数：路径解析
     int pathToInodeId(const std::string& path, std::string& errorMsg);

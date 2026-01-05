@@ -3,6 +3,7 @@
 #include "../../include/auth/Authenticator.h"
 #include "../../include/auth/PermissionChecker.h"
 #include <string>
+#include <iostream>
 
 // 构造函数实现
 ReviewFlow::ReviewFlow(Authenticator* auth, PermissionChecker* perm, FSProtocol* fs)
@@ -35,6 +36,15 @@ std::string ReviewFlow::submitForReview(const std::string& sessionId,
     if (reviewId.empty()) {
         errorMsg = "Failed to submit for review: " + errorMsg;
         return "";
+    }
+
+    // 4. 【新增】自动分配审稿人 "editor"
+    std::string assignErrorMsg;
+    if (!fsProtocol_->assignReviewer(reviewId, "editor", assignErrorMsg)) {
+        // 分配失败，记录日志或错误信息，但不让整个提交流程失败
+        std::cerr << "[ReviewFlow] Warning: Review submitted, but failed to assign reviewer: " << assignErrorMsg << std::endl;
+    } else {
+        std::cout << "[ReviewFlow] Successfully auto-assigned 'editor' to review ID: " << reviewId << std::endl;
     }
 
     return reviewId; // 返回审核请求的唯一 ID

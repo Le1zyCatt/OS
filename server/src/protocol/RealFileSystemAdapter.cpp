@@ -722,3 +722,18 @@ bool RealFileSystemAdapter::getFileSystemStats(FileSystemStats& stats, std::stri
     return true;
 }
 
+bool RealFileSystemAdapter::assignReviewer(const std::string& reviewId, const std::string& reviewer, std::string& errorMsg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    // 检查 reviewId 是否存在
+    auto it = m_reviews.find(reviewId);
+    if (it == m_reviews.end()) {
+        errorMsg = "Review not found: " + reviewId;
+        return false;
+    }
+    
+    // 记录审稿人分配
+    m_reviewAssignments[reviewId] = reviewer;
+    return true;
+}
+

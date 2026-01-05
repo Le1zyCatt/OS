@@ -575,21 +575,37 @@ class APSConsole {
     
     // TREE 命令分层颜色显示
     appendTreeLine(line) {
-        // 计算缩进层级（通过前导空格和树形符号）
-        const indentMatch = line.match(/^([\s│├└─]*)/);
+        // 计算缩进层级
+        // 树形格式如：
+        //   /                          -> level 0
+        //   ├── dir1/                  -> level 1
+        //   │   ├── file.txt           -> level 2
+        //   │   └── subdir/            -> level 2
+        //   │       └── deep.txt       -> level 3
+        
         let level = 0;
-        if (indentMatch) {
-            const indent = indentMatch[1];
-            // 每4个字符（含树形符号）算一层
-            level = Math.floor(indent.replace(/[^\s│├└─]/g, '').length / 4);
+        
+        // 统计前导的空格、│、├、└、─ 等字符的数量来确定层级
+        // 每一层通常有4个字符的缩进（如 "│   " 或 "    "）
+        let indent = 0;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === ' ' || ch === '│' || ch === '├' || ch === '└' || ch === '─' || ch === '\t') {
+                indent++;
+            } else {
+                break;
+            }
         }
         
-        // 限制层级范围
-        level = Math.min(level, 7);
+        // 每4个字符算一层
+        level = Math.floor(indent / 4);
+        
+        // 限制层级范围 0-7
+        level = Math.max(0, Math.min(level, 7));
         
         const lineEl = document.createElement('div');
-        // 复用终端行样式，确保等宽与缩进显示一致
-        lineEl.className = `terminal-line info tree-level-${level}`;
+        // 使用 tree-level-X 类设置不同颜色
+        lineEl.className = `terminal-line tree-level-${level}`;
         lineEl.textContent = line;
         this.terminalOutput.appendChild(lineEl);
         this.terminalOutput.scrollTop = this.terminalOutput.scrollHeight;
@@ -696,7 +712,10 @@ class APSConsole {
         this.appendLine('模拟 test_client.py --smoke 的完整命令流程', 'info');
         this.appendLine('', 'info');
         
+        // 使用较短延迟加快测试速度
         const delay = (ms) => new Promise(r => setTimeout(r, ms));
+        const D = 50;   // 普通命令延迟 (ms)
+        const D2 = 80;  // 重要节点延迟 (ms)
         const timestamp = Date.now();
         const testDir = `/demo_test_web_${timestamp}`;
         const paperId = `demo_paper_${timestamp}`;
@@ -712,47 +731,47 @@ class APSConsole {
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
             
             await this.login('admin', 'admin123');
-            await delay(200);
+            await delay(D);
             
             await this.printExchange('PWD');
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`MKDIR ${testDir}`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`WRITE ${testDir}/hello.txt Hello_World_from_Web_Console`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`READ ${testDir}/hello.txt`);
-            await delay(200);
+            await delay(D);
             
             // 多级目录测试
             await this.printExchange(`MKDIR ${testDir}/lvl1`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`MKDIR ${testDir}/lvl1/lvl2`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`MKDIR ${testDir}/lvl1/lvl2/lvl3`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`WRITE ${testDir}/lvl1/lvl2/deep_file.txt Content_in_deep_directory`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`CD ${testDir}`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange('LS .');
-            await delay(200);
+            await delay(D);
             
             await this.printExchange('CD /');
-            await delay(200);
+            await delay(D);
             
             await this.printExchange('LS /');
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`TREE ${testDir}`);
-            await delay(300);
+            await delay(D2);
             
             // ==================== 2. ADMIN 管理命令 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -760,13 +779,13 @@ class APSConsole {
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
             
             await this.printExchange('USER_LIST');
-            await delay(200);
+            await delay(D);
             
             await this.printExchange('SYSTEM_STATUS');
-            await delay(200);
+            await delay(D);
             
             await this.printExchange('CACHE_STATS');
-            await delay(300);
+            await delay(D2);
             
             // ==================== 3. 快照操作 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -774,23 +793,23 @@ class APSConsole {
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
             
             await this.printExchange(`BACKUP_CREATE / ${snapshotName}`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange('BACKUP_LIST');
-            await delay(200);
+            await delay(D);
             
             // 修改文件后恢复快照
             await this.printExchange(`WRITE ${testDir}/hello.txt Modified_content_after_snapshot`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`READ ${testDir}/hello.txt`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`BACKUP_RESTORE ${snapshotName}`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`READ ${testDir}/hello.txt`);
-            await delay(300);
+            await delay(D2);
             
             // ==================== 4. AUTHOR 论文上传 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -799,13 +818,13 @@ class APSConsole {
             
             await this.logout(true);
             await this.login('author', 'author123');
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`PAPER_UPLOAD ${paperId} This_is_a_demo_paper_content_for_academic_review_system_testing`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`STATUS ${paperId}`);
-            await delay(300);
+            await delay(D2);
 
             // 4.1) AUTHOR：二进制文件上传（base64）
             const pdfBinary = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n";
@@ -817,30 +836,30 @@ class APSConsole {
                 `PAPER_UPLOAD_FILE_B64 ${filePaperPdf} pdf ${pdfB64}`,
                 `PAPER_UPLOAD_FILE_B64 ${filePaperPdf} pdf <base64...>`
             );
-            await delay(200);
+            await delay(D);
 
             await this.printExchange(
                 `PAPER_UPLOAD_FILE_B64 ${filePaperDocx} docx ${docxB64}`,
                 `PAPER_UPLOAD_FILE_B64 ${filePaperDocx} docx <base64...>`
             );
-            await delay(200);
+            await delay(D);
 
             await this.printExchange(
                 `PAPER_UPLOAD_FILE_B64 ${filePaperRtf} rtf ${rtfB64}`,
                 `PAPER_UPLOAD_FILE_B64 ${filePaperRtf} rtf <base64...>`
             );
-            await delay(300);
+            await delay(D2);
 
             // 用 admin 读取并验证（只输出摘要，不打印二进制）
             await this.logout(true);
             await this.login('admin', 'admin123');
-            await delay(200);
+            await delay(D);
             await this.printBinaryRead(`/papers/${filePaperPdf}/current.pdf`, '%PDF-');
-            await delay(100);
+            await delay(D);
             await this.printBinaryRead(`/papers/${filePaperDocx}/current.docx`);
-            await delay(100);
+            await delay(D);
             await this.printBinaryRead(`/papers/${filePaperRtf}/current.rtf`, '{\\rtf1');
-            await delay(300);
+            await delay(D2);
             
             // ==================== 5. EDITOR 分配审稿人 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -849,13 +868,13 @@ class APSConsole {
             
             await this.logout(true);
             await this.login('editor', 'editor123');
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`ASSIGN_REVIEWER ${paperId} reviewer`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`STATUS ${paperId}`);
-            await delay(300);
+            await delay(D2);
             
             // ==================== 6. REVIEWER 审稿流程 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -864,16 +883,16 @@ class APSConsole {
             
             await this.logout(true);
             await this.login('reviewer', 'reviewer123');
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`PAPER_DOWNLOAD ${paperId}`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`REVIEW_SUBMIT ${paperId} Excellent_paper_well_written_recommend_accept`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`STATUS ${paperId}`);
-            await delay(300);
+            await delay(D2);
             
             // ==================== 7. EDITOR 最终决定 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -882,13 +901,13 @@ class APSConsole {
             
             await this.logout(true);
             await this.login('editor', 'editor123');
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`DECIDE ${paperId} ACCEPT`);
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`STATUS ${paperId}`);
-            await delay(300);
+            await delay(D2);
             
             // ==================== 8. AUTHOR 查看结果 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -897,10 +916,10 @@ class APSConsole {
             
             await this.logout(true);
             await this.login('author', 'author123');
-            await delay(200);
+            await delay(D);
             
             await this.printExchange(`REVIEWS_DOWNLOAD ${paperId}`);
-            await delay(300);
+            await delay(D2);
             
             // ==================== 完成 ====================
             this.appendLine('', 'info');

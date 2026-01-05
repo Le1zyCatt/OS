@@ -54,4 +54,8 @@ public:
     // 判断 path 是否为目录；若 path 不存在或读取失败，返回 false 并填写 errorMsg。
     virtual bool isDirectory(const std::string& path, bool& isDirOut, std::string& errorMsg) = 0;
     // 【新增】获取文件系统统计信息
-    virtual bool getFileSystemStats(FileSystemStats& stats, std::string& errorMsg) = 0;};
+    virtual bool getFileSystemStats(FileSystemStats& stats, std::string& errorMsg) = 0;
+    
+    // 【FileSystem API 调用点 10】为审核请求分配审稿人
+    virtual bool assignReviewer(const std::string& reviewId, const std::string& reviewer, std::string& errorMsg) = 0;
+};
