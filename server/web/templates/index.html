@@ -286,10 +286,24 @@
                         <div class="command-group" data-role="EDITOR">
                             <div class="command-group-title">📝 编辑</div>
                             <div class="command-item" data-cmd="ASSIGN_REVIEWER paper001 reviewer">ASSIGN_REVIEWER ...</div>
+                            <div class="command-item" data-cmd="ASSIGN_AUTO paper001">ASSIGN_AUTO (智能匹配)</div>
+                            <div class="command-item" data-cmd="LIST_REVIEWERS">LIST_REVIEWERS (方向列表)</div>
+                            <div class="command-item" data-cmd="GET_PAPER_FIELD paper001">GET_PAPER_FIELD ...</div>
+                            <div class="command-item" data-cmd="SET_PAPER_FIELD paper001 cs">SET_PAPER_FIELD ... cs</div>
                             <div class="command-item" data-cmd="DECIDE paper001 ACCEPT">DECIDE paper001 ACCEPT</div>
                             <div class="command-item" data-cmd="DECIDE paper001 REJECT">DECIDE paper001 REJECT</div>
                             <div class="command-item" data-cmd="STATUS paper001">STATUS paper001</div>
                             <div class="command-item" data-cmd="REVIEWS_DOWNLOAD paper001">REVIEWS_DOWNLOAD ...</div>
+                        </div>
+
+                        <!-- 研究方向命令 -->
+                        <div class="command-group" data-role="ALL">
+                            <div class="command-group-title">🎯 研究方向</div>
+                            <div class="command-item" data-cmd="SET_FIELD cs,ai">SET_FIELD cs,ai</div>
+                            <div class="command-item" data-cmd="SET_FIELD bio,med">SET_FIELD bio,med</div>
+                            <div class="command-item" data-cmd="SET_FIELD physics,math">SET_FIELD physics,math</div>
+                            <div class="command-item" data-cmd="GET_FIELD">GET_FIELD (我的方向)</div>
+                            <div class="command-item" data-cmd="LIST_REVIEWERS">LIST_REVIEWERS</div>
                         </div>
 
                         <!-- 审稿人命令 -->
@@ -309,6 +323,8 @@
                             <div class="command-item" data-cmd="PAPER_UPLOAD_FILE_B64 paper001 rtf <base64...>">PAPER_UPLOAD_FILE_B64 ... rtf</div>
                             <div class="command-item" data-cmd="PAPER_UPLOAD_PDF_B64 paper001 <base64...>">PAPER_UPLOAD_PDF_B64 ...</div>
                             <div class="command-item" data-cmd="PAPER_REVISE paper001 Revised_paper_content_v2">PAPER_REVISE ...</div>
+                            <div class="command-item" data-cmd="SET_PAPER_FIELD paper001 cs">SET_PAPER_FIELD ... cs</div>
+                            <div class="command-item" data-cmd="GET_PAPER_FIELD paper001">GET_PAPER_FIELD ...</div>
                             <div class="command-item" data-cmd="STATUS paper001">STATUS paper001</div>
                             <div class="command-item" data-cmd="REVIEWS_DOWNLOAD paper001">REVIEWS_DOWNLOAD ...</div>
                         </div>

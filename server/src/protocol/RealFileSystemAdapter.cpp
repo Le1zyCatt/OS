@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <ctime>
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -243,6 +244,44 @@ std::vector<std::string> RealFileSystemAdapter::listSnapshots(const std::string&
     
     std::sort(names.begin(), names.end());
     return names;
+}
+
+bool RealFileSystemAdapter::getSnapshotInfo(const std::string& snapshotName, int& fileCount, size_t& totalSize, std::string& timestamp, std::string& errorMsg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    Snapshot snapshots[MAX_SNAPSHOTS];
+    int count = list_snapshots(m_fd, snapshots, MAX_SNAPSHOTS);
+    
+    if (count < 0) {
+        errorMsg = "Failed to list snapshots";
+        return false;
+    }
+    
+    // 查找指定快照
+    for (int i = 0; i < count; ++i) {
+        if (snapshots[i].active && snapshotName == snapshots[i].name) {
+            // 简化实现：返回快照基本信息
+            // 由于快照是全盘快照，精确统计需要遍历所有 inode，这里提供估算值
+            fileCount = 0;  // 真实文件系统快照暂不统计文件数
+            totalSize = 0;  // 真实文件系统快照暂不统计总大小
+            
+            // 格式化时间戳
+            time_t t = static_cast<time_t>(snapshots[i].timestamp);
+            char buf[64];
+#ifdef _WIN32
+            struct tm tm_buf;
+            localtime_s(&tm_buf, &t);
+            std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm_buf);
+#else
+            std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", std::localtime(&t));
+#endif
+            timestamp = buf;
+            return true;
+        }
+    }
+    
+    errorMsg = "Snapshot not found: " + snapshotName;
+    return false;
 }
 
 bool RealFileSystemAdapter::readFile(const std::string& path, std::string& content, std::string& errorMsg) {

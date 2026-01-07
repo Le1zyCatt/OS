@@ -38,6 +38,9 @@ public:
     // 【FileSystem API 调用点 3】列出快照
     virtual std::vector<std::string> listSnapshots(const std::string& path, std::string& errorMsg) = 0;
     
+    // 【FileSystem API 调用点 3.1】获取快照详细信息
+    virtual bool getSnapshotInfo(const std::string& snapshotName, int& fileCount, size_t& totalSize, std::string& timestamp, std::string& errorMsg) = 0;
+    
     // 【FileSystem API 调用点 4】读取文件
     virtual bool readFile(const std::string& path, std::string& content, std::string& errorMsg) = 0;
     

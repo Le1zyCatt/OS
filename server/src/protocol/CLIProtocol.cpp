@@ -359,9 +359,10 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
         oss << "OK: ROLE=" << roleToString(role) << "\n";
         oss << "Common: READ WRITE MKDIR CD PWD LS TREE STATUS PAPER_DOWNLOAD\n";
         oss << "File: LINK STAT OPEN CLOSE (hard links & file locking)\n";
-        if (role == UserRole::AUTHOR) oss << "Author: PAPER_UPLOAD PAPER_UPLOAD_FILE_B64 PAPER_UPLOAD_PDF_B64 PAPER_REVISE REVIEWS_DOWNLOAD\n";
+        oss << "Field: SET_FIELD GET_FIELD LIST_REVIEWERS (research fields)\n";
+        if (role == UserRole::AUTHOR) oss << "Author: PAPER_UPLOAD PAPER_UPLOAD_FILE_B64 PAPER_UPLOAD_PDF_B64 PAPER_REVISE REVIEWS_DOWNLOAD SET_PAPER_FIELD GET_PAPER_FIELD\n";
         if (role == UserRole::REVIEWER) oss << "Reviewer: REVIEW_SUBMIT\n";
-        if (role == UserRole::EDITOR) oss << "Editor: ASSIGN_REVIEWER DECIDE REVIEWS_DOWNLOAD\n";
+        if (role == UserRole::EDITOR) oss << "Editor: ASSIGN_REVIEWER ASSIGN_AUTO DECIDE REVIEWS_DOWNLOAD SET_PAPER_FIELD GET_PAPER_FIELD\n";
         if (role == UserRole::ADMIN) oss << "Admin: USER_ADD USER_DEL USER_LIST BACKUP_CREATE BACKUP_LIST BACKUP_RESTORE SYSTEM_STATUS CACHE_STATS CACHE_CLEAR\n";
         response = oss.str();
     } else if (cmd == "CACHE_STATS") {
@@ -726,6 +727,34 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             for (const auto& n : names) oss << " " << n;
         }
         response = oss.str();
+    } else if (cmd == "BACKUP_INFO") {
+        // 获取指定快照的详细信息：文件数、总大小、时间戳
+        std::string sessionId, name;
+        ss >> sessionId >> name;
+        if (sessionId.empty() || name.empty()) {
+            response = "ERROR: Usage: BACKUP_INFO <sessionToken> <snapshotName>";
+            return false;
+        }
+        std::string username;
+        if (!m_auth->validateSession(sessionId, username, errorMsg)) {
+            response = "ERROR: Not authenticated: " + errorMsg;
+            return false;
+        }
+        const UserRole role = m_auth->getUserRole(sessionId);
+        if (!m_perm->hasPermission(role, Permission::BACKUP_LIST)) {
+            response = "ERROR: Permission denied.";
+            return false;
+        }
+        int fileCount = 0;
+        size_t totalSize = 0;
+        std::string timestamp;
+        if (m_fs->getSnapshotInfo(name, fileCount, totalSize, timestamp, errorMsg)) {
+            std::ostringstream oss;
+            oss << "OK: " << fileCount << " " << totalSize << " " << timestamp;
+            response = oss.str();
+        } else {
+            response = "ERROR: " + errorMsg;
+        }
     } else if (cmd == "BACKUP_RESTORE") {
         std::string sessionId, name;
         ss >> sessionId >> name;
@@ -972,6 +1001,141 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
         } else {
             response = "ERROR: " + errorMsg;
         }
+    } else if (cmd == "ASSIGN_AUTO") {
+        // 自动分配审稿人（基于研究方向匹配）
+        std::string sessionId, paperId;
+        ss >> sessionId >> paperId;
+        if (sessionId.empty() || paperId.empty()) {
+            response = "ERROR: Usage: ASSIGN_AUTO <sessionToken> <paperId>";
+            return false;
+        }
+        std::string assignedReviewer;
+        if (m_paper->autoAssignReviewer(sessionId, paperId, assignedReviewer, errorMsg)) {
+            response = "OK: Auto-assigned reviewer: " + assignedReviewer;
+        } else {
+            response = "ERROR: " + errorMsg;
+        }
+    } else if (cmd == "SET_FIELD") {
+        // 设置当前用户的研究方向
+        std::string sessionId, fieldsStr;
+        ss >> sessionId;
+        std::getline(ss, fieldsStr);
+        if (!fieldsStr.empty() && fieldsStr[0] == ' ') fieldsStr = fieldsStr.substr(1);
+        if (sessionId.empty()) {
+            response = "ERROR: Usage: SET_FIELD <sessionToken> <field1,field2,...>";
+            return false;
+        }
+        std::string username;
+        if (!m_auth->validateSession(sessionId, username, errorMsg)) {
+            response = "ERROR: Not authenticated: " + errorMsg;
+            return false;
+        }
+        // 解析逗号分隔的方向列表
+        std::vector<std::string> fields;
+        std::stringstream fss(fieldsStr);
+        std::string field;
+        while (std::getline(fss, field, ',')) {
+            // 去除首尾空格
+            size_t start = field.find_first_not_of(" \t");
+            size_t end = field.find_last_not_of(" \t");
+            if (start != std::string::npos && end != std::string::npos) {
+                fields.push_back(field.substr(start, end - start + 1));
+            }
+        }
+        if (m_auth->setUserFields(username, fields, errorMsg)) {
+            std::ostringstream oss;
+            oss << "OK: Fields set to [";
+            for (size_t i = 0; i < fields.size(); ++i) {
+                if (i > 0) oss << ", ";
+                oss << fields[i];
+            }
+            oss << "]";
+            response = oss.str();
+        } else {
+            response = "ERROR: " + errorMsg;
+        }
+    } else if (cmd == "GET_FIELD") {
+        // 获取用户的研究方向
+        std::string sessionId, targetUser;
+        ss >> sessionId >> targetUser;
+        if (sessionId.empty()) {
+            response = "ERROR: Usage: GET_FIELD <sessionToken> [username]";
+            return false;
+        }
+        std::string username;
+        if (!m_auth->validateSession(sessionId, username, errorMsg)) {
+            response = "ERROR: Not authenticated: " + errorMsg;
+            return false;
+        }
+        // 如果没指定用户，查询自己
+        if (targetUser.empty()) {
+            targetUser = username;
+        }
+        auto fields = m_auth->getUserFields(targetUser, errorMsg);
+        if (!errorMsg.empty() && fields.empty()) {
+            response = "ERROR: " + errorMsg;
+        } else {
+            std::ostringstream oss;
+            oss << "OK: " << targetUser << " fields: [";
+            for (size_t i = 0; i < fields.size(); ++i) {
+                if (i > 0) oss << ", ";
+                oss << fields[i];
+            }
+            oss << "]";
+            response = oss.str();
+        }
+    } else if (cmd == "SET_PAPER_FIELD") {
+        // 设置论文的研究方向
+        std::string sessionId, paperId, field;
+        ss >> sessionId >> paperId >> field;
+        if (sessionId.empty() || paperId.empty() || field.empty()) {
+            response = "ERROR: Usage: SET_PAPER_FIELD <sessionToken> <paperId> <field>";
+            return false;
+        }
+        if (m_paper->setPaperField(sessionId, paperId, field, errorMsg)) {
+            response = "OK: Paper field set to: " + field;
+        } else {
+            response = "ERROR: " + errorMsg;
+        }
+    } else if (cmd == "GET_PAPER_FIELD") {
+        // 获取论文的研究方向
+        std::string sessionId, paperId;
+        ss >> sessionId >> paperId;
+        if (sessionId.empty() || paperId.empty()) {
+            response = "ERROR: Usage: GET_PAPER_FIELD <sessionToken> <paperId>";
+            return false;
+        }
+        std::string fieldOut;
+        if (m_paper->getPaperField(sessionId, paperId, fieldOut, errorMsg)) {
+            response = "OK: Paper field: " + (fieldOut.empty() ? "(not set)" : fieldOut);
+        } else {
+            response = "ERROR: " + errorMsg;
+        }
+    } else if (cmd == "LIST_REVIEWERS") {
+        // 列出所有审稿人及其研究方向
+        std::string sessionId;
+        ss >> sessionId;
+        if (sessionId.empty()) {
+            response = "ERROR: Usage: LIST_REVIEWERS <sessionToken>";
+            return false;
+        }
+        std::string username;
+        if (!m_auth->validateSession(sessionId, username, errorMsg)) {
+            response = "ERROR: Not authenticated: " + errorMsg;
+            return false;
+        }
+        auto reviewers = m_auth->listUsersByRole(UserRole::REVIEWER, errorMsg);
+        std::ostringstream oss;
+        oss << "OK: " << reviewers.size() << " reviewer(s)\n";
+        for (const auto& [name, fields] : reviewers) {
+            oss << "  - " << name << " [";
+            for (size_t i = 0; i < fields.size(); ++i) {
+                if (i > 0) oss << ", ";
+                oss << fields[i];
+            }
+            oss << "]\n";
+        }
+        response = oss.str();
     } else if (cmd == "REVIEW_SUBMIT") {
         std::string sessionId, paperId, content;
         ss >> sessionId >> paperId;

@@ -58,6 +58,24 @@ public:
                        const std::string& paperId,
                        const std::string& decision,
                        std::string& errorMsg);
+    
+    // 自动分配审稿人（基于研究方向匹配）
+    bool autoAssignReviewer(const std::string& sessionToken,
+                            const std::string& paperId,
+                            std::string& assignedReviewer,
+                            std::string& errorMsg);
+    
+    // 设置论文的研究方向
+    bool setPaperField(const std::string& sessionToken,
+                       const std::string& paperId,
+                       const std::string& field,
+                       std::string& errorMsg);
+    
+    // 获取论文的研究方向
+    bool getPaperField(const std::string& sessionToken,
+                       const std::string& paperId,
+                       std::string& fieldOut,
+                       std::string& errorMsg);
 
 private:
     Authenticator* authenticator_;

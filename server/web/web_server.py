@@ -250,7 +250,7 @@ def api_filesystem_info():
 @app.route('/api/snapshots', methods=['GET'])
 def api_list_snapshots():
     """
-    获取所有快照列表
+    获取所有快照列表（含详细信息：文件数、总大小、时间戳）
     
     需要传递 token 参数进行认证
     """
@@ -271,9 +271,32 @@ def api_list_snapshots():
             if content == "(no snapshots)" or not content:
                 snapshots = []
             else:
-                parts = content.split()
-                # 过滤掉无效的快照名（如 "/" 或空字符串）
-                snapshots = [name for name in parts if name and name != "/" and not name.startswith("(")]
+                names = content.split()
+                # 过滤掉无效的快照名
+                names = [name for name in names if name and name != "/" and not name.startswith("(")]
+                
+                # 为每个快照获取详细信息
+                snapshots = []
+                for name in names:
+                    try:
+                        info_response = send_to_backend(f"BACKUP_INFO {token} {name}")
+                        if info_response.startswith("OK:"):
+                            # 解析 "OK: fileCount totalSize timestamp..."
+                            parts = info_response[4:].strip().split(" ", 2)
+                            if len(parts) >= 3:
+                                snapshots.append({
+                                    'name': name,
+                                    'fileCount': int(parts[0]),
+                                    'totalSize': int(parts[1]),
+                                    'timestamp': parts[2]
+                                })
+                            else:
+                                snapshots.append({'name': name, 'fileCount': 0, 'totalSize': 0, 'timestamp': ''})
+                        else:
+                            snapshots.append({'name': name, 'fileCount': 0, 'totalSize': 0, 'timestamp': ''})
+                    except:
+                        snapshots.append({'name': name, 'fileCount': 0, 'totalSize': 0, 'timestamp': ''})
+            
             return jsonify({
                 'success': True,
                 'snapshots': snapshots

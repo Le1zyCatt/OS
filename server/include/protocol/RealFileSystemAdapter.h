@@ -35,6 +35,7 @@ public:
     bool createSnapshot(const std::string& path, const std::string& snapshotName, std::string& errorMsg) override;
     bool restoreSnapshot(const std::string& snapshotName, std::string& errorMsg) override;
     std::vector<std::string> listSnapshots(const std::string& path, std::string& errorMsg) override;
+    bool getSnapshotInfo(const std::string& snapshotName, int& fileCount, size_t& totalSize, std::string& timestamp, std::string& errorMsg) override;
     bool readFile(const std::string& path, std::string& content, std::string& errorMsg) override;
     bool writeFile(const std::string& path, const std::string& content, std::string& errorMsg) override;
     bool deleteFile(const std::string& path, std::string& errorMsg) override;

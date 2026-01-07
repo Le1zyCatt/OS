@@ -365,6 +365,9 @@ class APSConsole {
     
     // 类似 test_client.py 的 _print_exchange 方法，显示输入命令和输出
     async printExchange(cmd, displayCmd = null) {
+        // 添加小延迟让测试过程更清晰可见
+        await new Promise(r => setTimeout(r, 200));
+        
         const showCmd = displayCmd || cmd;
         // 显示输入命令（绿色）
         this.appendLine(`>>> ${showCmd}`, 'success');
@@ -466,14 +469,14 @@ class APSConsole {
             return;
         }
         
-        // ASSIGN_RANDOM <paperId> - 随机选择评审人分配
-        if (upper === 'ASSIGN_RANDOM') {
+        // ASSIGN_AUTO <paperId> - 智能分配审稿人（基于研究方向匹配）
+        if (upper === 'ASSIGN_AUTO' || upper === 'ASSIGN_RANDOM') {
             const parts = cmd.split(/\s+/);
             if (parts.length < 2) {
-                this.appendLine('Usage: ASSIGN_RANDOM <paperId>', 'error');
+                this.appendLine('Usage: ASSIGN_AUTO <paperId>', 'error');
                 return;
             }
-            await this.assignRandomReviewer(parts[1]);
+            await this.assignAutoReviewer(parts[1]);
             return;
         }
         
@@ -899,12 +902,20 @@ class APSConsole {
             
             // ==================== 4. AUTHOR 论文上传 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
-            this.appendLine('【4/6】AUTHOR - 论文上传', 'warning');
+            this.appendLine('【4/8】AUTHOR - 论文上传与设置研究方向', 'warning');
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
             
             await this.logout(true);
             await this.login('author', 'author123');
+            
+            // 设置作者的研究方向
+            await this.printExchange('SET_FIELD cs,ai,ml');
+            await this.printExchange('GET_FIELD');
+            
             await this.printExchange(`PAPER_UPLOAD ${paperId} This_is_a_demo_paper_content_for_academic_review_system_testing`);
+            // 设置论文研究方向
+            await this.printExchange(`SET_PAPER_FIELD ${paperId} ai`);
+            await this.printExchange(`GET_PAPER_FIELD ${paperId}`);
             await this.printExchange(`STATUS ${paperId}`);
 
             // 4.1) AUTHOR：二进制文件上传（base64）
@@ -935,17 +946,22 @@ class APSConsole {
             
             // ==================== 5. EDITOR 分配审稿人 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
-            this.appendLine('【5/6】EDITOR - 分配审稿人与最终决定', 'warning');
+            this.appendLine('【5/8】EDITOR - 智能分配审稿人（方向匹配）', 'warning');
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
             
             await this.logout(true);
             await this.login('editor', 'editor123');
-            await this.printExchange(`ASSIGN_REVIEWER ${paperId} reviewer`);
+            
+            // 查看所有审稿人及其研究方向
+            await this.printExchange('LIST_REVIEWERS');
+            
+            // 使用智能分配（基于研究方向匹配）
+            await this.printExchange(`ASSIGN_AUTO ${paperId}`);
             await this.printExchange(`STATUS ${paperId}`);
             
             // ==================== 6. REVIEWER 审稿流程 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
-            this.appendLine('【6/6】REVIEWER - 下载论文并提交审稿意见', 'warning');
+            this.appendLine('【6/8】REVIEWER - 下载论文并提交审稿意见', 'warning');
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
             
             await this.logout(true);
@@ -956,7 +972,7 @@ class APSConsole {
             
             // ==================== 7. EDITOR 最终决定 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
-            this.appendLine('【7/7】EDITOR - 做出最终决定', 'warning');
+            this.appendLine('【7/8】EDITOR - 做出最终决定', 'warning');
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
             
             await this.logout(true);
@@ -986,10 +1002,11 @@ class APSConsole {
             this.appendLine('            LINK, STAT, OPEN, CLOSE (硬链接与文件锁定),', 'info');
             this.appendLine('            USER_LIST, SYSTEM_STATUS, CACHE_STATS,', 'info');
             this.appendLine('            BACKUP_CREATE, BACKUP_LIST, BACKUP_RESTORE,', 'info');
-            this.appendLine('            PAPER_UPLOAD, STATUS, ASSIGN_REVIEWER,', 'info');
+            this.appendLine('            SET_FIELD, GET_FIELD, LIST_REVIEWERS (研究方向),', 'info');
+            this.appendLine('            PAPER_UPLOAD, SET_PAPER_FIELD, GET_PAPER_FIELD,', 'info');
+            this.appendLine('            ASSIGN_AUTO (智能分配), STATUS,', 'info');
             this.appendLine('            PAPER_DOWNLOAD, REVIEW_SUBMIT, DECIDE,', 'info');
-            this.appendLine('            REVIEWS_DOWNLOAD', 'info');
-            this.appendLine('            PAPER_UPLOAD_FILE_B64, READ /papers/<id>/current.<ext>', 'info');
+            this.appendLine('            REVIEWS_DOWNLOAD, PAPER_UPLOAD_FILE_B64', 'info');
             this.appendLine('', 'info');
             
             // 刷新快照视图
@@ -1128,14 +1145,21 @@ class APSConsole {
 │   PAPER_REVISE <id> <content>   修改论文                   │
 │   STATUS <id>                   查看状态                   │
 │   REVIEWS_DOWNLOAD <id>         下载评审                   │
+│   SET_PAPER_FIELD <id> <field>  设置论文方向               │
+│   GET_PAPER_FIELD <id>          查看论文方向               │
 ├────────────────────────────────────────────────────────────┤
 │ 审稿操作 (审稿人):                                         │
 │   PAPER_DOWNLOAD <id>           下载论文                   │
 │   REVIEW_SUBMIT <id> <review>   提交评审                   │
 ├────────────────────────────────────────────────────────────┤
+│ 研究方向 (所有用户):                                       │
+│   SET_FIELD <f1,f2,...>         设置我的研究方向           │
+│   GET_FIELD [user]              查看用户研究方向           │
+│   LIST_REVIEWERS                审稿人方向列表             │
+├────────────────────────────────────────────────────────────┤
 │ 编辑操作 (编辑):                                           │
-│   ASSIGN_REVIEWER <id> <user>   分配审稿人                 │
-│   ASSIGN_RANDOM <id>            随机分配审稿人             │
+│   ASSIGN_REVIEWER <id> <user>   手动分配审稿人             │
+│   ASSIGN_AUTO <id>              智能分配(方向匹配)         │
 │   DECIDE <id> <ACCEPT|REJECT>   做出决定                   │
 ├────────────────────────────────────────────────────────────┤
 │ 管理操作 (管理员):                                         │
@@ -1466,17 +1490,21 @@ class APSConsole {
         
         // 渲染侧边栏快照列表 - 添加点击恢复功能
         listContainer.innerHTML = snapshots.map((name, index) => {
-            const timeStr = this.parseSnapshotTime(name);
+            // 从快照对象获取信息
+            const displayName = (typeof name === 'object') ? name.name : name;
+            const timestamp = (typeof name === 'object' && name.timestamp) ? name.timestamp : this.parseSnapshotTime(displayName);
+            const fileCount = (typeof name === 'object') ? (name.fileCount || 0) : 0;
+            const totalSize = (typeof name === 'object') ? this.formatSize(name.totalSize || 0) : '-';
             return `
-            <div class="snapshot-item" data-name="${this.escapeHtml(name)}" title="点击恢复此快照">
+            <div class="snapshot-item" data-name="${this.escapeHtml(displayName)}" title="点击恢复此快照">
                 <div class="snapshot-item-info">
                     <span class="snapshot-icon">📸</span>
                     <div class="snapshot-details">
-                        <span class="snapshot-name">${this.escapeHtml(name)}</span>
-                        <span class="snapshot-time-small">${this.escapeHtml(timeStr)}</span>
+                        <span class="snapshot-name">${this.escapeHtml(displayName)}</span>
+                        <span class="snapshot-time-small">${this.escapeHtml(timestamp)}</span>
                     </div>
                 </div>
-                <button class="btn-restore-small" onclick="event.stopPropagation(); window.apsConsole.restoreSnapshot('${this.escapeHtml(name)}')" title="恢复快照">↩</button>
+                <button class="btn-restore-small" onclick="event.stopPropagation(); window.apsConsole.restoreSnapshot('${this.escapeHtml(displayName)}')" title="恢复快照">↩</button>
             </div>
         `}).join('');
         
@@ -1489,21 +1517,25 @@ class APSConsole {
             });
         });
         
-        // 渲染快照管理卡片网格 - 添加创建时间
+        // 渲染快照管理卡片网格 - 显示文件大小、文件个数、时间戳
         gridContainer.innerHTML = snapshots.map((name, index) => {
-            const timeStr = this.parseSnapshotTime(name);
+            const displayName = (typeof name === 'object') ? name.name : name;
+            // 优先使用API返回的时间戳，其次从快照名解析
+            const timestamp = (typeof name === 'object' && name.timestamp) ? name.timestamp : this.parseSnapshotTime(displayName);
+            const fileCount = (typeof name === 'object') ? (name.fileCount || 0) : 0;
+            const totalSize = (typeof name === 'object') ? (name.totalSize || 0) : 0;
             return `
-            <div class="snapshot-card" data-name="${this.escapeHtml(name)}">
+            <div class="snapshot-card" data-name="${this.escapeHtml(displayName)}">
                 <div class="snapshot-card-header">
                     <div class="snapshot-card-icon">📸</div>
                     <div class="snapshot-card-info">
-                        <div class="snapshot-card-title">${this.escapeHtml(name)}</div>
-                        <div class="snapshot-card-time">📅 ${this.escapeHtml(timeStr)}</div>
-                        <div class="snapshot-card-scope">📁 范围: 整个文件系统 (/)</div>
+                        <div class="snapshot-card-title">${this.escapeHtml(displayName)}</div>
+                        <div class="snapshot-card-time">🕐 ${this.escapeHtml(timestamp)}</div>
+                        <div class="snapshot-card-stats">📄 ${fileCount} 个文件 · ${this.formatSize(totalSize)}</div>
                     </div>
                 </div>
                 <div class="snapshot-card-actions">
-                    <button class="btn-restore" onclick="window.apsConsole.restoreSnapshot('${this.escapeHtml(name)}')">
+                    <button class="btn-restore" onclick="window.apsConsole.restoreSnapshot('${this.escapeHtml(displayName)}')">
                         🔄 恢复此快照
                     </button>
                 </div>
@@ -1511,63 +1543,26 @@ class APSConsole {
         `}).join('');
     }
 
-    // ASSIGN_RANDOM - 随机从所有评审人中选一个分配给论文
-    async assignRandomReviewer(paperId) {
+    // ASSIGN_AUTO - 智能分配审稿人（基于研究方向匹配）
+    async assignAutoReviewer(paperId) {
         if (!this.activeToken) {
             this.appendLine('Please login first', 'error');
             return;
         }
         
         try {
-            // 1. 获取用户列表
-            const listResp = await fetch('/api/command', {
+            // 直接调用后端的 ASSIGN_AUTO 命令
+            const resp = await fetch('/api/command', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: `USER_LIST ${this.activeToken}` })
+                body: JSON.stringify({ command: `ASSIGN_AUTO ${this.activeToken} ${paperId}` })
             });
-            const listData = await listResp.json();
+            const data = await resp.json();
             
-            if (!listData.success || !listData.response) {
-                this.appendLine('ERROR: Failed to get user list', 'error');
-                return;
-            }
-            
-            // 解析评审人列表 (REVIEWER角色)
-            const lines = listData.response.split('\n');
-            const reviewers = [];
-            for (const line of lines) {
-                if (line.includes('REVIEWER')) {
-                    const match = line.match(/^\s*-?\s*(\w+)/); 
-                    if (match && match[1]) {
-                        reviewers.push(match[1]);
-                    }
-                }
-            }
-            
-            if (reviewers.length === 0) {
-                this.appendLine('ERROR: No reviewers found in system', 'error');
-                return;
-            }
-            
-            // 2. 随机选择一个评审人
-            const randomIdx = Math.floor(Math.random() * reviewers.length);
-            const selectedReviewer = reviewers[randomIdx];
-            
-            this.appendLine(`Found ${reviewers.length} reviewer(s): ${reviewers.join(', ')}`, 'info');
-            this.appendLine(`Randomly selected: ${selectedReviewer}`, 'info');
-            
-            // 3. 分配评审人
-            const assignResp = await fetch('/api/command', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: `ASSIGN_REVIEWER ${this.activeToken} ${paperId} ${selectedReviewer}` })
-            });
-            const assignData = await assignResp.json();
-            
-            if (assignData.success && assignData.response && !assignData.response.startsWith('ERROR')) {
-                this.appendLine(`OK: Assigned reviewer ${selectedReviewer} to paper ${paperId}`, 'success');
+            if (data.success && data.response && data.response.startsWith('OK:')) {
+                this.appendLine(data.response, 'success');
             } else {
-                this.appendLine(`ERROR: ${assignData.response || assignData.error}`, 'error');
+                this.appendLine(`ERROR: ${data.response || data.error}`, 'error');
             }
         } catch (err) {
             this.appendLine(`ERROR: ${err.message}`, 'error');
@@ -1737,6 +1732,19 @@ class APSConsole {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+    
+    // 格式化文件大小
+    formatSize(bytes) {
+        if (!bytes || bytes === 0) return '0 B';
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let i = 0;
+        let size = bytes;
+        while (size >= 1024 && i < units.length - 1) {
+            size /= 1024;
+            i++;
+        }
+        return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
     }
 }
 

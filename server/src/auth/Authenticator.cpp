@@ -17,6 +17,7 @@ using Clock = std::chrono::steady_clock;
 struct UserRecord {
     std::string password;
     UserRole role;
+    std::vector<std::string> fields;  // 研究方向列表，如 {"computer_science", "machine_learning"}
 };
 
 struct SessionRecord {
@@ -208,16 +209,54 @@ public:
         std::scoped_lock lock(m_mutex);
         return m_users.find(username) != m_users.end();
     }
+    
+    bool setUserFields(const std::string& username, const std::vector<std::string>& fields, std::string& errorMsg) override {
+        std::scoped_lock lock(m_mutex);
+        auto it = m_users.find(username);
+        if (it == m_users.end()) {
+            errorMsg = "User not found.";
+            return false;
+        }
+        it->second.fields = fields;
+        return true;
+    }
+    
+    std::vector<std::string> getUserFields(const std::string& username, std::string& errorMsg) override {
+        std::scoped_lock lock(m_mutex);
+        auto it = m_users.find(username);
+        if (it == m_users.end()) {
+            errorMsg = "User not found.";
+            return {};
+        }
+        return it->second.fields;
+    }
+    
+    std::vector<std::pair<std::string, std::vector<std::string>>> listUsersByRole(UserRole role, std::string& errorMsg) override {
+        (void)errorMsg;
+        std::scoped_lock lock(m_mutex);
+        std::vector<std::pair<std::string, std::vector<std::string>>> result;
+        for (const auto& [name, rec] : m_users) {
+            if (rec.role == role) {
+                result.emplace_back(name, rec.fields);
+            }
+        }
+        std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        return result;
+    }
 
 private:
     std::mutex m_mutex;
     std::unordered_map<std::string, UserRecord> m_users{
         // 先用硬编码账号便于联调；后续可替换为从 FSProtocol 读取用户/角色文件
-        {"admin", {"admin123", UserRole::ADMIN}},
-        {"editor", {"editor123", UserRole::EDITOR}},
-        {"reviewer", {"reviewer123", UserRole::REVIEWER}},
-        {"author", {"author123", UserRole::AUTHOR}},
-        {"guest", {"guest", UserRole::GUEST}},
+        // fields 示例: cs=计算机, bio=生物, chem=化学, physics=物理, math=数学, med=医学, ai=人工智能
+        {"admin", {"admin123", UserRole::ADMIN, {}}},
+        {"editor", {"editor123", UserRole::EDITOR, {"cs", "ai", "bio"}}},
+        {"reviewer", {"reviewer123", UserRole::REVIEWER, {"cs", "ai"}}},
+        {"reviewer2", {"reviewer123", UserRole::REVIEWER, {"bio", "med"}}},
+        {"reviewer3", {"reviewer123", UserRole::REVIEWER, {"physics", "math"}}},
+        {"author", {"author123", UserRole::AUTHOR, {"cs", "ai"}}},
+        {"author2", {"author123", UserRole::AUTHOR, {"bio", "chem"}}},
+        {"guest", {"guest", UserRole::GUEST, {}}},
     };
     std::unordered_map<std::string, SessionRecord> m_sessions;
 };

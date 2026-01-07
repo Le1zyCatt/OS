@@ -49,4 +49,14 @@ public:
 
     // 检查用户是否存在
     virtual bool userExists(const std::string& username) = 0;
+    
+    // --- 研究方向管理 ---
+    // 设置用户的研究方向（字符串列表，如 {"biology", "chemistry"}）
+    virtual bool setUserFields(const std::string& username, const std::vector<std::string>& fields, std::string& errorMsg) = 0;
+    
+    // 获取用户的研究方向
+    virtual std::vector<std::string> getUserFields(const std::string& username, std::string& errorMsg) = 0;
+    
+    // 获取所有具有特定角色的用户及其研究方向
+    virtual std::vector<std::pair<std::string, std::vector<std::string>>> listUsersByRole(UserRole role, std::string& errorMsg) = 0;
 };

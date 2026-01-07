@@ -164,15 +164,26 @@ public:
     }
     
     // 获取快照详细信息
-    bool getSnapshotInfo(const std::string& snapshotName, size_t& fileCount, size_t& totalSize, int& timestamp) {
+    bool getSnapshotInfo(const std::string& snapshotName, int& fileCount, size_t& totalSize, std::string& timestamp, std::string& errorMsg) override {
         std::scoped_lock lock(m_mutex);
         auto it = m_snapshots.find(snapshotName);
         if (it == m_snapshots.end()) {
+            errorMsg = "Snapshot not found: " + snapshotName;
             return false;
         }
-        fileCount = it->second.fileCount;
+        fileCount = static_cast<int>(it->second.fileCount);
         totalSize = it->second.totalSize;
-        timestamp = it->second.timestamp;
+        // 转换时间戳为字符串
+        time_t t = static_cast<time_t>(it->second.timestamp);
+        char buf[64];
+#ifdef _WIN32
+        struct tm tm_buf;
+        localtime_s(&tm_buf, &t);
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm_buf);
+#else
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", std::localtime(&t));
+#endif
+        timestamp = buf;
         return true;
     }
 
@@ -659,6 +670,10 @@ public:
 
     bool closeFile(const std::string& path, std::string& errorMsg) override {
         return m_inner->closeFile(path, errorMsg);
+    }
+
+    bool getSnapshotInfo(const std::string& snapshotName, int& fileCount, size_t& totalSize, std::string& timestamp, std::string& errorMsg) override {
+        return m_inner->getSnapshotInfo(snapshotName, fileCount, totalSize, timestamp, errorMsg);
     }
 
 private:

@@ -58,6 +58,7 @@ struct Meta {
     std::string status;     // SUBMITTED/UNDER_REVIEW/ACCEPTED/REJECTED
     std::string decision;   // ACCEPT/REJECT
     std::vector<std::string> reviewers;
+    std::string field;      // 论文研究方向，如 "cs", "bio", "ai"
 };
 
 std::vector<std::string> splitCsv(const std::string& s) {
@@ -97,6 +98,7 @@ bool readMeta(FSProtocol* fs, const std::string& paperId, Meta& meta, std::strin
         else if (key == "status") m.status = val;
         else if (key == "decision") m.decision = val;
         else if (key == "reviewers") m.reviewers = splitCsv(val);
+        else if (key == "field") m.field = val;
     }
 
     meta = std::move(m);
@@ -109,6 +111,7 @@ bool writeMeta(FSProtocol* fs, const std::string& paperId, const Meta& meta, std
     oss << "status=" << meta.status << "\n";
     oss << "decision=" << meta.decision << "\n";
     oss << "reviewers=" << joinCsv(meta.reviewers) << "\n";
+    oss << "field=" << meta.field << "\n";
     return fs->writeFile(metaPath(paperId), oss.str(), errorMsg);
 }
 
@@ -557,4 +560,143 @@ bool PaperService::finalDecision(const std::string& sessionToken,
     meta.status = (decision == "ACCEPT") ? "ACCEPTED" : "REJECTED";
 
     return writeMeta(fsProtocol_, paperId, meta, errorMsg);
+}
+bool PaperService::autoAssignReviewer(const std::string& sessionToken,
+                                       const std::string& paperIdRaw,
+                                       std::string& assignedReviewer,
+                                       std::string& errorMsg) {
+    const std::string paperId = normalizeId(paperIdRaw);
+    if (paperId.empty()) {
+        errorMsg = "paperId is empty.";
+        return false;
+    }
+
+    std::string username;
+    if (!validateToken(authenticator_, sessionToken, username, errorMsg)) return false;
+
+    const UserRole role = authenticator_->getUserRole(sessionToken);
+    if (!permissionChecker_->hasPermission(role, Permission::ASSIGN_REVIEWER)) {
+        errorMsg = "Permission denied.";
+        return false;
+    }
+
+    // 读取论文元数据
+    Meta meta;
+    if (!readMeta(fsProtocol_, paperId, meta, errorMsg)) return false;
+    
+    // 获取论文的研究方向
+    const std::string paperField = meta.field;
+    
+    // 获取所有审稿人及其研究方向
+    auto reviewers = authenticator_->listUsersByRole(UserRole::REVIEWER, errorMsg);
+    if (reviewers.empty()) {
+        errorMsg = "No reviewers available in the system.";
+        return false;
+    }
+    
+    // 过滤掉论文作者（避免自审）
+    reviewers.erase(
+        std::remove_if(reviewers.begin(), reviewers.end(),
+            [&meta](const auto& r) { return r.first == meta.author; }),
+        reviewers.end()
+    );
+    
+    // 过滤掉已分配的审稿人
+    reviewers.erase(
+        std::remove_if(reviewers.begin(), reviewers.end(),
+            [&meta](const auto& r) { return isReviewerAssigned(meta, r.first); }),
+        reviewers.end()
+    );
+    
+    if (reviewers.empty()) {
+        errorMsg = "No available reviewers (all reviewers are either the author or already assigned).";
+        return false;
+    }
+    
+    // 计算每个审稿人与论文方向的匹配度
+    std::string bestReviewer;
+    int bestScore = -1;
+    
+    for (const auto& [reviewerName, fields] : reviewers) {
+        int score = 0;
+        // 如果论文有研究方向，计算匹配度
+        if (!paperField.empty()) {
+            for (const auto& field : fields) {
+                if (field == paperField) {
+                    score += 10;  // 完全匹配加10分
+                } else if (paperField.find(field) != std::string::npos || 
+                           field.find(paperField) != std::string::npos) {
+                    score += 5;   // 部分匹配加5分
+                }
+            }
+        }
+        // 没有方向时随机选择（所有人分数相同）
+        if (score > bestScore || (score == bestScore && bestReviewer.empty())) {
+            bestScore = score;
+            bestReviewer = reviewerName;
+        }
+    }
+    
+    // 如果没有匹配的，选择第一个可用的审稿人
+    if (bestReviewer.empty()) {
+        bestReviewer = reviewers.front().first;
+    }
+    
+    // 分配审稿人
+    meta.reviewers.push_back(bestReviewer);
+    if (meta.status == "SUBMITTED") {
+        meta.status = "UNDER_REVIEW";
+    }
+    
+    if (!writeMeta(fsProtocol_, paperId, meta, errorMsg)) return false;
+    
+    assignedReviewer = bestReviewer;
+    return true;
+}
+
+bool PaperService::setPaperField(const std::string& sessionToken,
+                                  const std::string& paperIdRaw,
+                                  const std::string& field,
+                                  std::string& errorMsg) {
+    const std::string paperId = normalizeId(paperIdRaw);
+    if (paperId.empty()) {
+        errorMsg = "paperId is empty.";
+        return false;
+    }
+
+    std::string username;
+    if (!validateToken(authenticator_, sessionToken, username, errorMsg)) return false;
+
+    Meta meta;
+    if (!readMeta(fsProtocol_, paperId, meta, errorMsg)) return false;
+    
+    // 只有作者或编辑可以设置论文方向
+    const UserRole role = authenticator_->getUserRole(sessionToken);
+    if (meta.author != username && role != UserRole::EDITOR && role != UserRole::ADMIN) {
+        errorMsg = "Permission denied. Only the author or editor can set paper field.";
+        return false;
+    }
+    
+    meta.field = field;
+    return writeMeta(fsProtocol_, paperId, meta, errorMsg);
+}
+
+bool PaperService::getPaperField(const std::string& sessionToken,
+                                  const std::string& paperIdRaw,
+                                  std::string& fieldOut,
+                                  std::string& errorMsg) {
+    const std::string paperId = normalizeId(paperIdRaw);
+    if (paperId.empty()) {
+        errorMsg = "paperId is empty.";
+        return false;
+    }
+
+    std::string username;
+    if (!validateToken(authenticator_, sessionToken, username, errorMsg)) return false;
+
+    Meta meta;
+    if (!readMeta(fsProtocol_, paperId, meta, errorMsg)) return false;
+    
+    fieldOut = meta.field;
+    return true;
 }
