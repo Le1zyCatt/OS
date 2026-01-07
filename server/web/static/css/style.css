@@ -249,8 +249,9 @@ body {
 .snapshot-item {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
-    padding: 8px 12px;
+    padding: 10px 12px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
     border-radius: 6px;
@@ -261,20 +262,73 @@ body {
 
 .snapshot-item:hover {
     border-color: var(--accent-yellow);
+    background: rgba(210, 153, 34, 0.1);
+}
+
+.snapshot-item.snapshot-empty {
+    cursor: default;
+}
+
+.snapshot-item.snapshot-empty:hover {
+    border-color: var(--border-color);
+    background: var(--bg-tertiary);
+}
+
+.snapshot-item-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+
+.snapshot-details {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
 }
 
 .snapshot-icon {
     color: var(--accent-yellow);
+    font-size: 16px;
 }
 
 .snapshot-name {
     flex: 1;
     color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.snapshot-time-small {
+    font-size: 10px;
+    color: var(--text-muted);
 }
 
 .snapshot-time {
     color: var(--text-muted);
     font-size: 11px;
+}
+
+.btn-restore-small {
+    padding: 4px 8px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+}
+
+.btn-restore-small:hover {
+    background: rgba(63, 185, 80, 0.2);
+    border-color: var(--accent-green);
+    color: var(--accent-green);
 }
 
 /* ===== 主内容区 ===== */
@@ -1201,3 +1255,65 @@ body {
     background: rgba(88, 166, 255, 0.3);
 }
 
+/* ===== 快照操作Toast提示 ===== */
+.snapshot-toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 14px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    z-index: 10000;
+    opacity: 0;
+    transform: translateX(100px);
+    transition: all 0.3s ease;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    max-width: 350px;
+}
+
+.snapshot-toast.show {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.snapshot-toast-success {
+    background: linear-gradient(135deg, #2ea043, #238636);
+    color: #fff;
+    border: 1px solid #3fb950;
+}
+
+.snapshot-toast-error {
+    background: linear-gradient(135deg, #da3633, #b62324);
+    color: #fff;
+    border: 1px solid #f85149;
+}
+
+.snapshot-toast-warning {
+    background: linear-gradient(135deg, #9e6a03, #bb8009);
+    color: #fff;
+    border: 1px solid #d29922;
+}
+
+.snapshot-toast-info {
+    background: linear-gradient(135deg, #1f6feb, #388bfd);
+    color: #fff;
+    border: 1px solid #58a6ff;
+}
+
+.toast-message {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ===== 优化快照卡片样式 ===== */
+.snapshot-card-info {
+    flex: 1;
+}
+
+.snapshot-card-scope {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}

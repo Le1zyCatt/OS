@@ -241,6 +241,29 @@ class APSConsole {
         }, 1000);
     }
 
+    // 显示快照操作的Toast提示
+    showSnapshotToast(message, type = 'info') {
+        // 移除已有的快照 toast
+        document.querySelectorAll('.snapshot-toast').forEach(t => t.remove());
+        
+        const toast = document.createElement('div');
+        toast.className = `snapshot-toast snapshot-toast-${type}`;
+        toast.innerHTML = `<span class="toast-message">${message}</span>`;
+        document.body.appendChild(toast);
+        
+        // 触发动画
+        requestAnimationFrame(() => {
+            toast.classList.add('show');
+        });
+        
+        // 自动消失时间根据类型不同
+        const duration = type === 'success' ? 3000 : (type === 'error' ? 4000 : 2000);
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        }, duration);
+    }
+
     // 清空终端
     clearTerminal() {
         this.terminalOutput.innerHTML = '';
@@ -1343,12 +1366,40 @@ class APSConsole {
         }
     }
 
+    // 从快照名称解析创建时间（如果名称包含时间戳）
+    parseSnapshotTime(name) {
+        // 尝试匹配常见的时间戳格式
+        // 格式1: snapshot_01-07_1430 (月-日_时分)
+        const match1 = name.match(/(\d{2})-(\d{2})_(\d{2})(\d{2})$/);
+        if (match1) {
+            const now = new Date();
+            return `${now.getFullYear()}年${match1[1]}月${match1[2]}日 ${match1[3]}:${match1[4]}`;
+        }
+        
+        // 格式2: snap_web_1704567890123 (Unix毫秒时间戳)
+        const match2 = name.match(/(\d{13})$/);
+        if (match2) {
+            const date = new Date(parseInt(match2[1]));
+            return date.toLocaleString('zh-CN');
+        }
+        
+        // 格式3: snapshot_1704567890123 (Unix毫秒时间戳)
+        const match3 = name.match(/_(\d{10,13})$/);
+        if (match3) {
+            const ts = match3[1].length === 10 ? parseInt(match3[1]) * 1000 : parseInt(match3[1]);
+            const date = new Date(ts);
+            return date.toLocaleString('zh-CN');
+        }
+        
+        return '系统快照';
+    }
+
     renderSnapshotsList(snapshots) {
         const listContainer = document.getElementById('snapshotsList');
         const gridContainer = document.getElementById('snapshotGrid');
         
         if (!snapshots || snapshots.length === 0) {
-            listContainer.innerHTML = '<div class="snapshot-item" style="color: var(--text-muted); justify-content: center;">暂无快照</div>';
+            listContainer.innerHTML = '<div class="snapshot-item snapshot-empty" style="color: var(--text-muted); justify-content: center;">暂无快照</div>';
             gridContainer.innerHTML = `
                 <div class="snapshot-card-empty">
                     <div class="empty-icon">📷</div>
@@ -1359,29 +1410,51 @@ class APSConsole {
             return;
         }
         
-        // 渲染侧边栏快照列表
-        listContainer.innerHTML = snapshots.map(name => `
-            <div class="snapshot-item" data-name="${this.escapeHtml(name)}">
-                <span class="snapshot-name">📸 ${this.escapeHtml(name)}</span>
-                <button class="btn-restore" onclick="window.aps.restoreSnapshot('${this.escapeHtml(name)}')">恢复</button>
+        // 渲染侧边栏快照列表 - 添加点击恢复功能
+        listContainer.innerHTML = snapshots.map((name, index) => {
+            const timeStr = this.parseSnapshotTime(name);
+            return `
+            <div class="snapshot-item" data-name="${this.escapeHtml(name)}" title="点击恢复此快照">
+                <div class="snapshot-item-info">
+                    <span class="snapshot-icon">📸</span>
+                    <div class="snapshot-details">
+                        <span class="snapshot-name">${this.escapeHtml(name)}</span>
+                        <span class="snapshot-time-small">${this.escapeHtml(timeStr)}</span>
+                    </div>
+                </div>
+                <button class="btn-restore-small" onclick="event.stopPropagation(); window.apsConsole.restoreSnapshot('${this.escapeHtml(name)}')" title="恢复快照">↩</button>
             </div>
-        `).join('');
+        `}).join('');
         
-        // 渲染快照管理卡片网格
-        gridContainer.innerHTML = snapshots.map(name => `
-            <div class="snapshot-card">
+        // 绑定侧边栏快照点击事件
+        listContainer.querySelectorAll('.snapshot-item[data-name]').forEach(item => {
+            item.addEventListener('click', (e) => {
+                if (e.target.classList.contains('btn-restore-small')) return;
+                const name = item.dataset.name;
+                this.restoreSnapshot(name);
+            });
+        });
+        
+        // 渲染快照管理卡片网格 - 添加创建时间
+        gridContainer.innerHTML = snapshots.map((name, index) => {
+            const timeStr = this.parseSnapshotTime(name);
+            return `
+            <div class="snapshot-card" data-name="${this.escapeHtml(name)}">
                 <div class="snapshot-card-header">
                     <div class="snapshot-card-icon">📸</div>
-                    <div>
+                    <div class="snapshot-card-info">
                         <div class="snapshot-card-title">${this.escapeHtml(name)}</div>
-                        <div class="snapshot-card-time">文件系统快照</div>
+                        <div class="snapshot-card-time">📅 ${this.escapeHtml(timeStr)}</div>
+                        <div class="snapshot-card-scope">📁 范围: 整个文件系统 (/)</div>
                     </div>
                 </div>
                 <div class="snapshot-card-actions">
-                    <button class="btn-restore" onclick="window.aps.restoreSnapshot('${this.escapeHtml(name)}')">🔄 恢复此快照</button>
+                    <button class="btn-restore" onclick="window.apsConsole.restoreSnapshot('${this.escapeHtml(name)}')">
+                        🔄 恢复此快照
+                    </button>
                 </div>
             </div>
-        `).join('');
+        `}).join('');
     }
 
     // ASSIGN_RANDOM - 随机从所有评审人中选一个分配给论文
@@ -1449,11 +1522,20 @@ class APSConsole {
 
     async createSnapshot() {
         if (!this.activeToken) {
-            this.appendOutput('warning', '请先登录');
+            this.showSnapshotToast('⚠️ 请先登录才能创建快照', 'warning');
+            this.appendLine('请先登录才能创建快照', 'warning');
             return;
         }
         
-        const name = prompt('请输入快照名称:', `snapshot_${Date.now()}`);
+        // 生成默认快照名称，包含时间戳
+        const now = new Date();
+        const timeStr = now.toLocaleString('zh-CN', {
+            month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit'
+        }).replace(/\//g, '-').replace(/\s/g, '_').replace(/:/g, '');
+        const defaultName = `snapshot_${timeStr}`;
+        
+        const name = prompt('请输入快照名称:\n（将创建包含当前目录和系统所有内容的快照）', defaultName);
         if (!name) return;
         
         try {
@@ -1465,25 +1547,37 @@ class APSConsole {
             
             const data = await response.json();
             if (data.success) {
-                this.appendOutput('success', `✅ 快照 "${name}" 创建成功`);
-                this.refreshSnapshots();
+                const createTime = new Date().toLocaleString('zh-CN');
+                this.showSnapshotToast(`✅ 快照 "${name}" 创建成功`, 'success');
+                this.appendLine(`✅ 快照创建成功`, 'success');
+                this.appendLine(`   名称: ${name}`, 'info');
+                this.appendLine(`   创建时间: ${createTime}`, 'info');
+                this.appendLine(`   范围: 整个文件系统（根目录 /）`, 'info');
+                await this.refreshSnapshots();
             } else {
-                this.appendOutput('error', `❌ 创建快照失败: ${data.error || data.response}`);
+                this.showSnapshotToast(`❌ 创建失败: ${data.error || data.response}`, 'error');
+                this.appendLine(`❌ 创建快照失败: ${data.error || data.response}`, 'error');
             }
         } catch (err) {
-            this.appendOutput('error', `❌ 创建快照失败: ${err.message}`);
+            this.showSnapshotToast(`❌ 创建失败: ${err.message}`, 'error');
+            this.appendLine(`❌ 创建快照失败: ${err.message}`, 'error');
         }
     }
 
     async restoreSnapshot(name) {
         if (!this.activeToken) {
-            this.appendOutput('warning', '请先登录');
+            this.showSnapshotToast('⚠️ 请先登录', 'warning');
+            this.appendLine('请先登录才能恢复快照', 'warning');
             return;
         }
         
-        if (!confirm(`确定要恢复到快照 "${name}" 吗？当前数据可能会丢失。`)) {
+        if (!confirm(`确定要恢复到快照 "${name}" 吗？\n\n⚠️ 警告：当前未保存的数据可能会丢失！`)) {
             return;
         }
+        
+        // 显示恢复中状态
+        this.showSnapshotToast(`⏳ 正在恢复快照 "${name}"...`, 'info');
+        this.appendLine(`正在恢复快照: ${name}...`, 'info');
         
         try {
             const response = await fetch('/api/snapshots/restore', {
@@ -1494,14 +1588,21 @@ class APSConsole {
             
             const data = await response.json();
             if (data.success) {
-                this.appendOutput('success', `✅ 已恢复到快照 "${name}"`);
-                // 刷新文件系统视图
-                this.refreshFilesystemView();
+                // 成功恢复 - 显示明确的成功提示
+                this.showSnapshotToast(`✅ 成功恢复快照 "${name}"`, 'success');
+                this.appendLine(`✅ 成功恢复快照: ${name}`, 'success');
+                this.appendLine(`   文件系统已恢复到快照 "${name}" 的状态`, 'info');
+                
+                // 刷新文件系统视图和目录
+                await this.refreshFilesystemView();
+                await this.refreshSnapshots();
             } else {
-                this.appendOutput('error', `❌ 恢复快照失败: ${data.error || data.response}`);
+                this.showSnapshotToast(`❌ 恢复失败: ${data.error || data.response}`, 'error');
+                this.appendLine(`❌ 恢复快照失败: ${data.error || data.response}`, 'error');
             }
         } catch (err) {
-            this.appendOutput('error', `❌ 恢复快照失败: ${err.message}`);
+            this.showSnapshotToast(`❌ 恢复失败: ${err.message}`, 'error');
+            this.appendLine(`❌ 恢复快照失败: ${err.message}`, 'error');
         }
     }
     
@@ -1549,13 +1650,14 @@ class APSConsole {
             <div class="snapshot-card">
                 <div class="snapshot-card-header">
                     <div class="snapshot-card-icon">📸</div>
-                    <div>
+                    <div class="snapshot-card-info">
                         <div class="snapshot-card-title">${this.escapeHtml(s.name)}</div>
-                        <div class="snapshot-card-time">${this.escapeHtml(s.time)}</div>
+                        <div class="snapshot-card-time">📅 ${this.parseSnapshotTime(s.name)}</div>
+                        <div class="snapshot-card-scope">📁 范围: 整个文件系统 (/)</div>
                     </div>
                 </div>
                 <div class="snapshot-card-actions">
-                    <button class="btn-restore" onclick="apsConsole.restoreSnapshot('${this.escapeHtml(s.name)}')">
+                    <button class="btn-restore" onclick="window.apsConsole.restoreSnapshot('${this.escapeHtml(s.name)}')">
                         🔄 恢复此快照
                     </button>
                 </div>
@@ -1566,17 +1668,9 @@ class APSConsole {
         listContainer.querySelectorAll('.snapshot-item').forEach(item => {
             item.addEventListener('click', () => {
                 const name = item.dataset.name;
-                if (confirm(`确定要恢复快照 "${name}" 吗？`)) {
-                    this.restoreSnapshot(name);
-                }
+                this.restoreSnapshot(name);
             });
         });
-    }
-    
-    async restoreSnapshot(name) {
-        this.appendLine(`正在恢复快照: ${name}...`, 'info');
-        await this.sendCommand(`BACKUP_RESTORE ${name}`);
-        this.refreshAll();
     }
     
     refreshIfNeeded() {
@@ -1594,3 +1688,5 @@ class APSConsole {
 
 // 初始化
 const apsConsole = new APSConsole();
+// 兼容旧代码的全局引用
+window.apsConsole = apsConsole;
