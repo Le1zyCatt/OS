@@ -52,6 +52,12 @@ public:
     
     // 分配审稿人
     bool assignReviewer(const std::string& reviewId, const std::string& reviewer, std::string& errorMsg) override;
+    
+    // 硬链接与文件锁定
+    bool createHardLink(const std::string& sourcePath, const std::string& linkPath, std::string& errorMsg) override;
+    bool getFileInfo(const std::string& path, FileInfo& info, std::string& errorMsg) override;
+    bool openFile(const std::string& path, std::string& errorMsg) override;
+    bool closeFile(const std::string& path, std::string& errorMsg) override;
 
     // 新增：获取论文访问统计
     size_t getPaperAccessCount(const std::string& paperId) const;
@@ -65,6 +71,12 @@ private:
     
     // 论文访问统计（paperId -> 访问次数）
     mutable std::unordered_map<std::string, size_t> m_paperAccessCounts;
+    
+    // 文件打开计数（路径 -> 打开次数）
+    std::unordered_map<std::string, int> m_openCounts;
+    
+    // 硬链接映射（链接路径 -> 目标路径）
+    std::unordered_map<std::string, std::string> m_hardLinks;
     
     // 审核请求存储（reviewId -> 请求信息）
     struct ReviewRequest {

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>论文审稿系统 - 控制台</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=20260107">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260107c">
 </head>
 <body>
     <div class="main-container">
@@ -256,9 +256,16 @@
                             <div class="command-item" data-cmd="MKDIR /test">MKDIR /test</div>
                             <div class="command-item" data-cmd="WRITE /test/hello.txt hello_world">WRITE /test/hello.txt ...</div>
                             <div class="command-item" data-cmd="READ /test/hello.txt">READ /test/hello.txt</div>
-                            <div class="command-item" data-cmd="READ /papers/paper001/current.pdf">READ /papers/.../current.pdf</div>
-                            <div class="command-item" data-cmd="READ /papers/paper001/current.docx">READ /papers/.../current.docx</div>
-                            <div class="command-item" data-cmd="READ /papers/paper001/current.rtf">READ /papers/.../current.rtf</div>
+                            <div class="command-item" data-cmd="STAT /test/hello.txt">STAT /test/hello.txt</div>
+                        </div>
+
+                        <!-- 硬链接与文件锁定 -->
+                        <div class="command-group">
+                            <div class="command-group-title">🔗 硬链接与锁定</div>
+                            <div class="command-item" data-cmd="LINK /test/hello.txt /test/hello_link.txt">LINK (创建硬链接)</div>
+                            <div class="command-item" data-cmd="STAT /test/hello.txt">STAT (查看链接计数)</div>
+                            <div class="command-item" data-cmd="OPEN /test/hello.txt">OPEN (打开文件)</div>
+                            <div class="command-item" data-cmd="CLOSE /test/hello.txt">CLOSE (关闭文件)</div>
                         </div>
 
                         <!-- 管理员命令 -->
@@ -337,6 +344,6 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=20260107"></script>
+    <script src="/static/js/app.js?v=20260107c"></script>
 </body>
 </html>

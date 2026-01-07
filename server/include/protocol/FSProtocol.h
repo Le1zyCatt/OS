@@ -14,6 +14,15 @@ struct FileSystemStats {
     bool is_real_fs;        // 是否是真实文件系统（非模拟）
 };
 
+// 文件详细信息结构
+struct FileInfo {
+    std::string path;       // 文件路径
+    int link_count;         // 硬链接计数
+    int open_count;         // 打开计数
+    size_t size;            // 文件大小
+    bool is_directory;      // 是否为目录
+};
+
 // 【关键】标注所有需 FileSystem 提供的 API
 // 注意：此头文件不包含任何 FS 实现，仅定义接口
 class FSProtocol {
@@ -58,4 +67,16 @@ public:
     
     // 【FileSystem API 调用点 10】为审核请求分配审稿人
     virtual bool assignReviewer(const std::string& reviewId, const std::string& reviewer, std::string& errorMsg) = 0;
+    
+    // 【FileSystem API 调用点 11】创建硬链接
+    virtual bool createHardLink(const std::string& sourcePath, const std::string& linkPath, std::string& errorMsg) = 0;
+    
+    // 【FileSystem API 调用点 12】获取文件信息（包括链接计数、打开计数）
+    virtual bool getFileInfo(const std::string& path, FileInfo& info, std::string& errorMsg) = 0;
+    
+    // 【FileSystem API 调用点 13】打开文件（增加打开计数）
+    virtual bool openFile(const std::string& path, std::string& errorMsg) = 0;
+    
+    // 【FileSystem API 调用点 14】关闭文件（减少打开计数）
+    virtual bool closeFile(const std::string& path, std::string& errorMsg) = 0;
 };

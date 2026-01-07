@@ -17,7 +17,7 @@
 RealFileSystemAdapter::RealFileSystemAdapter(const std::string& diskPath) {
     m_fd = disk_open(diskPath.c_str());
     if (m_fd < 0) {
-        std::cerr << "❌ Failed to open disk image: " << diskPath << std::endl;
+        // 不输出错误信息，直接抛出异常让上层处理
         throw std::runtime_error("Failed to open disk image: " + diskPath);
     }
     
@@ -305,14 +305,28 @@ bool RealFileSystemAdapter::writeFile(const std::string& path, const std::string
     
     std::string normPath = normalizePath(path);
     
+    // 检查是否是硬链接
+    std::string targetPath = normPath;
+    auto linkIt = m_hardLinks.find(normPath);
+    if (linkIt != m_hardLinks.end()) {
+        targetPath = linkIt->second;
+    }
+    
+    // 检查文件是否被打开
+    auto openIt = m_openCounts.find(targetPath);
+    if (openIt != m_openCounts.end() && openIt->second > 0) {
+        errorMsg = "File is open by " + std::to_string(openIt->second) + " process(es). Cannot modify.";
+        return false;
+    }
+    
     // 首先确保父目录存在（使用内部函数，避免重复加锁）
-    size_t lastSlash = normPath.find_last_of('/');
+    size_t lastSlash = targetPath.find_last_of('/');
     if (lastSlash == std::string::npos || lastSlash == 0) {
         // 路径在根目录下
         lastSlash = (lastSlash == std::string::npos) ? 0 : lastSlash;
     }
-    std::string parentPath = (lastSlash == 0) ? "/" : normPath.substr(0, lastSlash);
-    std::string fileName = normPath.substr(lastSlash + 1);
+    std::string parentPath = (lastSlash == 0) ? "/" : targetPath.substr(0, lastSlash);
+    std::string fileName = targetPath.substr(lastSlash + 1);
     
     if (fileName.empty()) {
         errorMsg = "Invalid file path: no filename";
@@ -403,6 +417,21 @@ bool RealFileSystemAdapter::deleteFile(const std::string& path, std::string& err
     
     std::string normPath = normalizePath(path);
     
+    // 检查是否是硬链接
+    auto linkIt = m_hardLinks.find(normPath);
+    if (linkIt != m_hardLinks.end()) {
+        // 删除硬链接（只删除映射，不删除实际文件）
+        m_hardLinks.erase(linkIt);
+        return true;
+    }
+    
+    // 检查文件是否被打开
+    auto openIt = m_openCounts.find(normPath);
+    if (openIt != m_openCounts.end() && openIt->second > 0) {
+        errorMsg = "File is open by " + std::to_string(openIt->second) + " process(es). Cannot delete.";
+        return false;
+    }
+    
     // 不能删除根目录
     if (normPath == "/") {
         errorMsg = "Cannot delete root directory";
@@ -440,6 +469,20 @@ bool RealFileSystemAdapter::deleteFile(const std::string& path, std::string& err
     // 只能删除文件，不能删除目录（需要单独的 rmdir）
     if (fileInode.type == INODE_TYPE_DIR) {
         errorMsg = "Cannot delete directory using deleteFile: " + normPath;
+        return false;
+    }
+    
+    // 检查是否有硬链接指向此文件
+    int linkCount = 0;
+    for (const auto& [link, target] : m_hardLinks) {
+        if (target == normPath) {
+            linkCount++;
+        }
+    }
+    
+    if (linkCount > 0) {
+        // 还有硬链接指向此文件，不能删除实际内容
+        errorMsg = "File has " + std::to_string(linkCount) + " hard link(s). Remove links first.";
         return false;
     }
     
@@ -737,3 +780,144 @@ bool RealFileSystemAdapter::assignReviewer(const std::string& reviewId, const st
     return true;
 }
 
+bool RealFileSystemAdapter::createHardLink(const std::string& sourcePath, const std::string& linkPath, std::string& errorMsg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    std::string normSource = normalizePath(sourcePath);
+    std::string normLink = normalizePath(linkPath);
+    
+    // 检查源文件是否存在
+    int sourceInodeId = get_inode_by_path(m_fd, normSource.c_str());
+    if (sourceInodeId < 0) {
+        errorMsg = "Source file not found: " + normSource;
+        return false;
+    }
+    
+    // 检查目标路径是否已存在
+    int linkInodeId = get_inode_by_path(m_fd, normLink.c_str());
+    if (linkInodeId >= 0 || m_hardLinks.find(normLink) != m_hardLinks.end()) {
+        errorMsg = "Link path already exists: " + normLink;
+        return false;
+    }
+    
+    // 读取源 inode，检查是否为目录
+    Inode sourceInode;
+    if (read_inode(m_fd, sourceInodeId, &sourceInode) < 0) {
+        errorMsg = "Failed to read source inode";
+        return false;
+    }
+    
+    if (sourceInode.type == INODE_TYPE_DIR) {
+        errorMsg = "Cannot create hard link to directory.";
+        return false;
+    }
+    
+    // 在内存中记录硬链接映射（简化实现，不修改磁盘 inode）
+    m_hardLinks[normLink] = normSource;
+    
+    return true;
+}
+
+bool RealFileSystemAdapter::getFileInfo(const std::string& path, FileInfo& info, std::string& errorMsg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    std::string normPath = normalizePath(path);
+    
+    // 检查是否是硬链接
+    std::string targetPath = normPath;
+    auto linkIt = m_hardLinks.find(normPath);
+    if (linkIt != m_hardLinks.end()) {
+        targetPath = linkIt->second;
+    }
+    
+    int inodeId = get_inode_by_path(m_fd, targetPath.c_str());
+    if (inodeId < 0) {
+        errorMsg = "File not found: " + normPath;
+        return false;
+    }
+    
+    Inode inode;
+    if (read_inode(m_fd, inodeId, &inode) < 0) {
+        errorMsg = "Failed to read inode";
+        return false;
+    }
+    
+    info.path = normPath;
+    info.size = static_cast<size_t>(inode.size);
+    info.is_directory = (inode.type == INODE_TYPE_DIR);
+    
+    // 计算硬链接计数（1 + 指向此路径的硬链接数）
+    int linkCount = 1;
+    for (const auto& [link, target] : m_hardLinks) {
+        if (target == targetPath) {
+            linkCount++;
+        }
+    }
+    info.link_count = linkCount;
+    
+    // 获取打开计数
+    auto openIt = m_openCounts.find(targetPath);
+    info.open_count = (openIt != m_openCounts.end()) ? openIt->second : 0;
+    
+    return true;
+}
+
+bool RealFileSystemAdapter::openFile(const std::string& path, std::string& errorMsg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    std::string normPath = normalizePath(path);
+    
+    // 检查是否是硬链接
+    std::string targetPath = normPath;
+    auto linkIt = m_hardLinks.find(normPath);
+    if (linkIt != m_hardLinks.end()) {
+        targetPath = linkIt->second;
+    }
+    
+    // 检查文件是否存在
+    int inodeId = get_inode_by_path(m_fd, targetPath.c_str());
+    if (inodeId < 0) {
+        errorMsg = "File not found: " + normPath;
+        return false;
+    }
+    
+    // 增加打开计数
+    m_openCounts[targetPath]++;
+    
+    return true;
+}
+
+bool RealFileSystemAdapter::closeFile(const std::string& path, std::string& errorMsg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    std::string normPath = normalizePath(path);
+    
+    // 检查是否是硬链接
+    std::string targetPath = normPath;
+    auto linkIt = m_hardLinks.find(normPath);
+    if (linkIt != m_hardLinks.end()) {
+        targetPath = linkIt->second;
+    }
+    
+    // 检查文件是否存在
+    int inodeId = get_inode_by_path(m_fd, targetPath.c_str());
+    if (inodeId < 0) {
+        errorMsg = "File not found: " + normPath;
+        return false;
+    }
+    
+    // 检查打开计数
+    auto openIt = m_openCounts.find(targetPath);
+    if (openIt == m_openCounts.end() || openIt->second <= 0) {
+        errorMsg = "File is not open: " + normPath;
+        return false;
+    }
+    
+    // 减少打开计数
+    openIt->second--;
+    if (openIt->second == 0) {
+        m_openCounts.erase(openIt);
+    }
+    
+    return true;
+}

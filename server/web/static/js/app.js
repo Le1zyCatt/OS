@@ -822,6 +822,37 @@ class APSConsole {
             await this.printExchange('LS /');
             await this.printExchange(`TREE ${testDir}`);
             
+            // ==================== 1.5 硬链接与文件锁定测试 ====================
+            this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
+            this.appendLine('【1.5】硬链接与文件锁定功能测试', 'warning');
+            this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
+            
+            // 创建硬链接
+            this.appendLine('\n🔗 测试硬链接功能...', 'info');
+            await this.printExchange(`LINK ${testDir}/hello.txt ${testDir}/hello_link.txt`);
+            await this.printExchange(`STAT ${testDir}/hello.txt`);  // 应显示 link_count=2
+            await this.printExchange(`READ ${testDir}/hello_link.txt`);  // 通过硬链接读取
+            
+            // 测试文件打开计数
+            this.appendLine('\n🔒 测试文件锁定功能...', 'info');
+            await this.printExchange(`OPEN ${testDir}/hello.txt`);  // 打开文件
+            await this.printExchange(`STAT ${testDir}/hello.txt`);  // 应显示 open_count=1
+            
+            // 尝试修改打开的文件（应该失败）
+            const writeResult = await this.printExchange(`WRITE ${testDir}/hello.txt Trying_to_modify_open_file`);
+            if (writeResult && writeResult.includes('ERROR')) {
+                this.appendLine('✅ 锁定测试通过：打开的文件无法被修改', 'success');
+            }
+            
+            // 关闭文件
+            await this.printExchange(`CLOSE ${testDir}/hello.txt`);
+            await this.printExchange(`STAT ${testDir}/hello.txt`);  // 应显示 open_count=0
+            
+            // 现在可以修改了
+            await this.printExchange(`WRITE ${testDir}/hello.txt File_modified_after_close`);
+            this.appendLine('✅ 硬链接与文件锁定测试完成', 'success');
+            this.appendLine('', 'info');
+            
             // ==================== 2. ADMIN 管理命令 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
             this.appendLine('【2/6】ADMIN - 管理员专用命令', 'warning');
@@ -836,13 +867,35 @@ class APSConsole {
             this.appendLine('【3/6】ADMIN - 快照操作 (Snapshot)', 'warning');
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
             
+            // 3.1 创建快照前先确保文件内容
+            const originalContent = 'Original_Content_Before_Snapshot';
+            const modifiedContent = 'Modified_Content_After_Snapshot';
+            await this.printExchange(`WRITE ${testDir}/snapshot_test.txt ${originalContent}`);
+            this.appendLine('\n📸 创建快照...', 'info');
             await this.printExchange(`BACKUP_CREATE / ${snapshotName}`);
             await this.printExchange('BACKUP_LIST');
-            // 修改文件后恢复快照
-            await this.printExchange(`WRITE ${testDir}/hello.txt Modified_content_after_snapshot`);
-            await this.printExchange(`READ ${testDir}/hello.txt`);
+            
+            // 3.2 修改文件内容
+            this.appendLine('\n✏️ 修改文件内容...', 'info');
+            await this.printExchange(`WRITE ${testDir}/snapshot_test.txt ${modifiedContent}`);
+            const afterModify = await this.printExchange(`READ ${testDir}/snapshot_test.txt`);
+            
+            // 3.3 恢复快照
+            this.appendLine('\n⏪ 恢复快照...', 'info');
             await this.printExchange(`BACKUP_RESTORE ${snapshotName}`);
-            await this.printExchange(`READ ${testDir}/hello.txt`);
+            const afterRestore = await this.printExchange(`READ ${testDir}/snapshot_test.txt`);
+            
+            // 3.4 验证快照恢复是否成功
+            this.appendLine('\n🔍 验证快照恢复结果...', 'info');
+            if (afterRestore && afterRestore.includes(originalContent)) {
+                this.appendLine('✅ 快照测试通过！文件内容已成功恢复到快照状态', 'success');
+                this.showSnapshotToast('✅ 快照功能测试通过', 'success');
+            } else if (afterRestore && afterRestore.includes(modifiedContent)) {
+                this.appendLine('⚠️ 快照恢复可能未生效，文件仍为修改后的内容', 'warning');
+            } else {
+                this.appendLine('ℹ️ 快照操作已执行（请检查响应结果）', 'info');
+            }
+            this.appendLine('', 'info');
             
             // ==================== 4. AUTHOR 论文上传 ====================
             this.appendLine('═══════════════════════════════════════════════════════════════', 'warning');
@@ -930,6 +983,7 @@ class APSConsole {
             this.appendLine(`测试快照: ${snapshotName}`, 'info');
             this.appendLine('', 'info');
             this.appendLine('已展示命令: PWD, MKDIR, WRITE, READ, CD, LS, TREE,', 'info');
+            this.appendLine('            LINK, STAT, OPEN, CLOSE (硬链接与文件锁定),', 'info');
             this.appendLine('            USER_LIST, SYSTEM_STATUS, CACHE_STATS,', 'info');
             this.appendLine('            BACKUP_CREATE, BACKUP_LIST, BACKUP_RESTORE,', 'info');
             this.appendLine('            PAPER_UPLOAD, STATUS, ASSIGN_REVIEWER,', 'info');

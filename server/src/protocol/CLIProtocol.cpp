@@ -358,6 +358,7 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
         std::ostringstream oss;
         oss << "OK: ROLE=" << roleToString(role) << "\n";
         oss << "Common: READ WRITE MKDIR CD PWD LS TREE STATUS PAPER_DOWNLOAD\n";
+        oss << "File: LINK STAT OPEN CLOSE (hard links & file locking)\n";
         if (role == UserRole::AUTHOR) oss << "Author: PAPER_UPLOAD PAPER_UPLOAD_FILE_B64 PAPER_UPLOAD_PDF_B64 PAPER_REVISE REVIEWS_DOWNLOAD\n";
         if (role == UserRole::REVIEWER) oss << "Reviewer: REVIEW_SUBMIT\n";
         if (role == UserRole::EDITOR) oss << "Editor: ASSIGN_REVIEWER DECIDE REVIEWS_DOWNLOAD\n";
@@ -674,7 +675,24 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
         // name 为空时由 flow 生成默认名称
         // 快照是全局的，不需要路径参数
         if (m_backupFlow->createBackup(sessionId, "/", name, errorMsg)) {
-            response = "OK: Backup created. (快照包含整个文件系统，不包括用户账户)";
+            // 获取文件系统统计信息以显示快照内容
+            FileSystemStats stats;
+            std::string statsErr;
+            if (m_fs->getFileSystemStats(stats, statsErr)) {
+                int usedBlocks = stats.block_count - stats.free_block_count;
+                int usedInodes = stats.inode_count - stats.free_inode_count;
+                size_t estimatedSize = static_cast<size_t>(usedBlocks) * stats.block_size;
+                std::ostringstream oss;
+                oss << "OK: 快照创建成功\n";
+                oss << "  快照名称: " << (name.empty() ? "(自动生成)" : name) << "\n";
+                oss << "  文件/目录数: " << usedInodes << "\n";
+                oss << "  占用块数: " << usedBlocks << "\n";
+                oss << "  总大小: " << (estimatedSize / 1024) << " KB\n";
+                oss << "  范围: 整个文件系统 (/)";
+                response = oss.str();
+            } else {
+                response = "OK: Backup created. (快照包含整个文件系统)";
+            }
         } else {
             response = "ERROR: " + errorMsg;
         }
@@ -726,7 +744,20 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             return false;
         }
         if (m_fs->restoreSnapshot(name, errorMsg)) {
-            response = "OK: Restored. (已恢复文件系统，用户账户不受影响)";
+            // 获取恢复后的文件系统统计
+            FileSystemStats stats;
+            std::string statsErr;
+            if (m_fs->getFileSystemStats(stats, statsErr)) {
+                int usedInodes = stats.inode_count - stats.free_inode_count;
+                std::ostringstream oss;
+                oss << "OK: 快照恢复成功\n";
+                oss << "  恢复的快照: " << name << "\n";
+                oss << "  当前文件/目录数: " << usedInodes << "\n";
+                oss << "  文件系统已完全恢复到快照状态";
+                response = oss.str();
+            } else {
+                response = "OK: 快照 '" + name + "' 恢复成功，文件系统已还原";
+            }
         } else {
             response = "ERROR: " + errorMsg;
         }
@@ -1056,6 +1087,126 @@ bool CLIProtocol::processCommand(const std::string& command, std::string& respon
             oss << "\n" << name << " " << roleToString(role);
         }
         response = oss.str();
+    } else if (cmd == "LINK") {
+        // 创建硬链接: LINK <sessionToken> <sourcePath> <linkPath>
+        std::string sessionId, sourcePath, linkPath;
+        ss >> sessionId >> sourcePath >> linkPath;
+        if (sessionId.empty() || sourcePath.empty() || linkPath.empty()) {
+            response = "ERROR: Usage: LINK <sessionToken> <sourcePath> <linkPath>";
+            return false;
+        }
+        std::string username;
+        if (!m_auth->validateSession(sessionId, username, errorMsg)) {
+            response = "ERROR: Not authenticated: " + errorMsg;
+            return false;
+        }
+        const UserRole role = m_auth->getUserRole(sessionId);
+        if (!m_perm->hasPermission(role, Permission::WRITE_FILE)) {
+            response = "ERROR: Permission denied.";
+            return false;
+        }
+        const std::string normSource = resolvePathFromCwd(m_auth->getCwd(sessionId), sourcePath);
+        const std::string normLink = resolvePathFromCwd(m_auth->getCwd(sessionId), linkPath);
+        if (m_fs->createHardLink(normSource, normLink, errorMsg)) {
+            response = "OK: Hard link created: " + normLink + " -> " + normSource;
+        } else {
+            response = "ERROR: " + errorMsg;
+        }
+    } else if (cmd == "STAT") {
+        // 获取文件信息（包括链接计数、打开计数）: STAT <sessionToken> <path>
+        std::string sessionId, path;
+        ss >> sessionId >> path;
+        if (sessionId.empty() || path.empty()) {
+            response = "ERROR: Usage: STAT <sessionToken> <path>";
+            return false;
+        }
+        std::string username;
+        if (!m_auth->validateSession(sessionId, username, errorMsg)) {
+            response = "ERROR: Not authenticated: " + errorMsg;
+            return false;
+        }
+        const UserRole role = m_auth->getUserRole(sessionId);
+        if (!m_perm->hasPermission(role, Permission::READ_FILE)) {
+            response = "ERROR: Permission denied.";
+            return false;
+        }
+        const std::string normPath = resolvePathFromCwd(m_auth->getCwd(sessionId), path);
+        FileInfo info;
+        if (m_fs->getFileInfo(normPath, info, errorMsg)) {
+            std::ostringstream oss;
+            oss << "OK:\n";
+            oss << "  Path: " << info.path << "\n";
+            oss << "  Type: " << (info.is_directory ? "Directory" : "File") << "\n";
+            oss << "  Size: " << info.size << " bytes\n";
+            oss << "  Link count: " << info.link_count << "\n";
+            oss << "  Open count: " << info.open_count;
+            if (info.open_count > 0) {
+                oss << " (file is locked)";
+            }
+            response = oss.str();
+        } else {
+            response = "ERROR: " + errorMsg;
+        }
+    } else if (cmd == "OPEN") {
+        // 打开文件（增加打开计数）: OPEN <sessionToken> <path>
+        std::string sessionId, path;
+        ss >> sessionId >> path;
+        if (sessionId.empty() || path.empty()) {
+            response = "ERROR: Usage: OPEN <sessionToken> <path>";
+            return false;
+        }
+        std::string username;
+        if (!m_auth->validateSession(sessionId, username, errorMsg)) {
+            response = "ERROR: Not authenticated: " + errorMsg;
+            return false;
+        }
+        const UserRole role = m_auth->getUserRole(sessionId);
+        if (!m_perm->hasPermission(role, Permission::READ_FILE)) {
+            response = "ERROR: Permission denied.";
+            return false;
+        }
+        const std::string normPath = resolvePathFromCwd(m_auth->getCwd(sessionId), path);
+        if (m_fs->openFile(normPath, errorMsg)) {
+            // 获取当前打开计数
+            FileInfo info;
+            if (m_fs->getFileInfo(normPath, info, errorMsg)) {
+                response = "OK: File opened. Open count: " + std::to_string(info.open_count);
+            } else {
+                response = "OK: File opened.";
+            }
+        } else {
+            response = "ERROR: " + errorMsg;
+        }
+    } else if (cmd == "CLOSE") {
+        // 关闭文件（减少打开计数）: CLOSE <sessionToken> <path>
+        std::string sessionId, path;
+        ss >> sessionId >> path;
+        if (sessionId.empty() || path.empty()) {
+            response = "ERROR: Usage: CLOSE <sessionToken> <path>";
+            return false;
+        }
+        std::string username;
+        if (!m_auth->validateSession(sessionId, username, errorMsg)) {
+            response = "ERROR: Not authenticated: " + errorMsg;
+            return false;
+        }
+        const UserRole role = m_auth->getUserRole(sessionId);
+        if (!m_perm->hasPermission(role, Permission::READ_FILE)) {
+            response = "ERROR: Permission denied.";
+            return false;
+        }
+        const std::string normPath = resolvePathFromCwd(m_auth->getCwd(sessionId), path);
+        if (m_fs->closeFile(normPath, errorMsg)) {
+            // 获取当前打开计数
+            FileInfo info;
+            if (m_fs->getFileInfo(normPath, info, errorMsg)) {
+                response = "OK: File closed. Open count: " + std::to_string(info.open_count);
+            } else {
+                response = "OK: File closed.";
+            }
+        } else {
+            response = "ERROR: " + errorMsg;
+        }
     } else {
         response = "ERROR: Unknown command '" + cmd + "'";
         return false;

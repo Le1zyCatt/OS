@@ -201,7 +201,7 @@ def run_concurrent_test(num_clients, scenario='login'):
 
 def main():
     parser = argparse.ArgumentParser(description='论文审稿系统并发测试')
-    parser.add_argument('--clients', type=int, default=10, help='并发客户端数量')
+    parser.add_argument('--clients', type=int, default=300, help='并发客户端数量')
     parser.add_argument('--scenario', choices=['login', 'upload', 'mixed'], 
                        default='login', help='测试场景')
     parser.add_argument('--host', default='localhost', help='服务器地址')

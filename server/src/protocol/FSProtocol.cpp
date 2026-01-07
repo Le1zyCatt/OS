@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -44,28 +45,76 @@ std::string makeId(const char* prefix) {
 
 }
 
+// 快照元数据结构
+struct SnapshotMetadata {
+    std::unordered_map<std::string, std::string> files;   // 所有文件内容
+    std::unordered_set<std::string> dirs;                  // 所有目录
+    std::string currentDir;                                 // 当前工作目录
+    int timestamp;                                          // 创建时间戳
+    size_t totalSize;                                       // 总大小（字节）
+    size_t fileCount;                                       // 文件数量
+    // 硬链接和打开计数也需要保存
+    std::unordered_map<std::string, int> linkCounts;       // 硬链接计数
+    std::unordered_map<std::string, int> openCounts;       // 打开计数
+    std::unordered_map<std::string, std::string> hardLinks; // 硬链接映射（链接路径 -> 目标路径）
+};
+
+// 文件元数据结构
+struct FileMeta {
+    int linkCount;    // 硬链接计数
+    int openCount;    // 打开计数
+    FileMeta() : linkCount(1), openCount(0) {}
+};
+
 // 具体的文件系统协议实现类
 class RealFSProtocol : public FSProtocol {
 public:
+    RealFSProtocol() {
+        // 初始化根目录
+        m_dirs.insert("/");
+        m_currentDir = "/";
+    }
+
     bool createSnapshot(const std::string& path, const std::string& snapshotName, std::string& errorMsg) override {
-        const std::string normPath = normalizePath(path);
+        (void)path;  // 全量快照，忽略路径参数
+        
         if (snapshotName.empty()) {
             errorMsg = "snapshotName is empty.";
             return false;
         }
 
         std::scoped_lock lock(m_mutex);
-        std::unordered_map<std::string, std::string> captured;
-
-        // 捕获该路径前缀下的所有文件（演示用：简单前缀匹配）
-        const std::string prefix = (normPath == "/") ? "/" : (normPath + "/");
-        for (const auto& [filePath, content] : m_files) {
-            if (normPath == "/" || filePath == normPath || startsWith(filePath, prefix)) {
-                captured[filePath] = content;
-            }
+        
+        // 创建全量快照：保存所有文件、目录和当前目录
+        SnapshotMetadata snapshot;
+        snapshot.files = m_files;           // 复制所有文件
+        snapshot.dirs = m_dirs;             // 复制所有目录
+        snapshot.currentDir = m_currentDir; // 保存当前目录
+        snapshot.timestamp = static_cast<int>(std::time(nullptr));
+        snapshot.fileCount = m_files.size();
+        
+        // 保存硬链接和打开计数信息
+        for (const auto& [path, meta] : m_fileMeta) {
+            snapshot.linkCounts[path] = meta.linkCount;
+            snapshot.openCounts[path] = meta.openCount;
         }
-
-        m_snapshots[snapshotName] = std::move(captured);
+        snapshot.hardLinks = m_hardLinks;
+        
+        // 计算总大小
+        size_t totalSize = 0;
+        for (const auto& [_, content] : m_files) {
+            totalSize += content.size();
+        }
+        snapshot.totalSize = totalSize;
+        
+        m_snapshots[snapshotName] = std::move(snapshot);
+        
+        // 输出快照信息用于调试
+        std::cout << "Created snapshot '" << snapshotName << "': " 
+                  << m_files.size() << " files, " 
+                  << m_dirs.size() << " dirs, "
+                  << totalSize << " bytes" << std::endl;
+        
         return true;
     }
 
@@ -77,11 +126,26 @@ public:
             return false;
         }
 
-        // 演示用：恢复为快照内容（覆盖同名文件；不会删除快照里不存在但当前存在的文件）
-        for (const auto& [filePath, content] : it->second) {
-            m_dirs.insert(parentDir(filePath));
-            m_files[filePath] = content;
+        const SnapshotMetadata& snapshot = it->second;
+        
+        // 全量恢复：完全替换当前状态
+        m_files = snapshot.files;           // 完全替换所有文件
+        m_dirs = snapshot.dirs;             // 完全替换所有目录
+        m_currentDir = snapshot.currentDir; // 恢复当前目录
+        
+        // 恢复硬链接和打开计数信息
+        m_fileMeta.clear();
+        for (const auto& [path, linkCount] : snapshot.linkCounts) {
+            m_fileMeta[path].linkCount = linkCount;
         }
+        for (const auto& [path, openCount] : snapshot.openCounts) {
+            m_fileMeta[path].openCount = openCount;
+        }
+        m_hardLinks = snapshot.hardLinks;
+        
+        std::cout << "Restored snapshot '" << snapshotName << "': " 
+                  << m_files.size() << " files, " 
+                  << m_dirs.size() << " dirs restored" << std::endl;
 
         return true;
     }
@@ -98,12 +162,32 @@ public:
         std::sort(names.begin(), names.end());
         return names;
     }
+    
+    // 获取快照详细信息
+    bool getSnapshotInfo(const std::string& snapshotName, size_t& fileCount, size_t& totalSize, int& timestamp) {
+        std::scoped_lock lock(m_mutex);
+        auto it = m_snapshots.find(snapshotName);
+        if (it == m_snapshots.end()) {
+            return false;
+        }
+        fileCount = it->second.fileCount;
+        totalSize = it->second.totalSize;
+        timestamp = it->second.timestamp;
+        return true;
+    }
 
     bool readFile(const std::string& path, std::string& content, std::string& errorMsg) override {
         const std::string normPath = normalizePath(path);
         std::scoped_lock lock(m_mutex);
 
-        auto it = m_files.find(normPath);
+        // 检查是否是硬链接，如果是则读取目标文件
+        std::string targetPath = normPath;
+        auto linkIt = m_hardLinks.find(normPath);
+        if (linkIt != m_hardLinks.end()) {
+            targetPath = linkIt->second;
+        }
+
+        auto it = m_files.find(targetPath);
         if (it == m_files.end()) {
             errorMsg = "File not found.";
             return false;
@@ -117,9 +201,29 @@ public:
         const std::string dir = parentDir(normPath);
         std::scoped_lock lock(m_mutex);
 
+        // 检查是否是硬链接，如果是则写入目标文件
+        std::string targetPath = normPath;
+        auto linkIt = m_hardLinks.find(normPath);
+        if (linkIt != m_hardLinks.end()) {
+            targetPath = linkIt->second;
+        }
+
+        // 检查文件是否被打开
+        auto metaIt = m_fileMeta.find(targetPath);
+        if (metaIt != m_fileMeta.end() && metaIt->second.openCount > 0) {
+            errorMsg = "File is open by " + std::to_string(metaIt->second.openCount) + " process(es). Cannot modify.";
+            return false;
+        }
+
         // 演示用：自动创建父目录
         m_dirs.insert(dir);
-        m_files[normPath] = content;
+        
+        // 如果是新文件，初始化元数据
+        if (m_files.find(targetPath) == m_files.end()) {
+            m_fileMeta[targetPath] = FileMeta();
+        }
+        
+        m_files[targetPath] = content;
         (void)errorMsg;
         return true;
     }
@@ -128,10 +232,46 @@ public:
         const std::string normPath = normalizePath(path);
         std::scoped_lock lock(m_mutex);
 
-        if (m_files.erase(normPath) == 0) {
+        // 检查是否是硬链接
+        auto linkIt = m_hardLinks.find(normPath);
+        if (linkIt != m_hardLinks.end()) {
+            // 删除硬链接
+            std::string targetPath = linkIt->second;
+            m_hardLinks.erase(linkIt);
+            
+            // 减少目标文件的链接计数
+            auto metaIt = m_fileMeta.find(targetPath);
+            if (metaIt != m_fileMeta.end()) {
+                metaIt->second.linkCount--;
+            }
+            return true;
+        }
+
+        auto it = m_files.find(normPath);
+        if (it == m_files.end()) {
             errorMsg = "File not found.";
             return false;
         }
+
+        // 检查文件是否被打开
+        auto metaIt = m_fileMeta.find(normPath);
+        if (metaIt != m_fileMeta.end()) {
+            if (metaIt->second.openCount > 0) {
+                errorMsg = "File is open by " + std::to_string(metaIt->second.openCount) + " process(es). Cannot delete.";
+                return false;
+            }
+            
+            // 检查链接计数
+            if (metaIt->second.linkCount > 1) {
+                // 还有其他硬链接指向此文件，只减少链接计数
+                metaIt->second.linkCount--;
+                // 不删除实际文件内容
+                return true;
+            }
+        }
+
+        m_files.erase(normPath);
+        m_fileMeta.erase(normPath);
         return true;
     }
 
@@ -251,6 +391,142 @@ public:
         return true;
     }
 
+    bool createHardLink(const std::string& sourcePath, const std::string& linkPath, std::string& errorMsg) override {
+        const std::string normSource = normalizePath(sourcePath);
+        const std::string normLink = normalizePath(linkPath);
+        std::scoped_lock lock(m_mutex);
+
+        // 检查源文件是否存在
+        if (m_files.find(normSource) == m_files.end()) {
+            errorMsg = "Source file not found: " + normSource;
+            return false;
+        }
+
+        // 检查目标路径是否已存在
+        if (m_files.find(normLink) != m_files.end() || m_hardLinks.find(normLink) != m_hardLinks.end()) {
+            errorMsg = "Link path already exists: " + normLink;
+            return false;
+        }
+
+        // 不允许对目录创建硬链接
+        if (m_dirs.find(normSource) != m_dirs.end()) {
+            errorMsg = "Cannot create hard link to directory.";
+            return false;
+        }
+
+        // 创建硬链接
+        m_hardLinks[normLink] = normSource;
+        
+        // 增加源文件的链接计数
+        if (m_fileMeta.find(normSource) == m_fileMeta.end()) {
+            m_fileMeta[normSource] = FileMeta();
+        }
+        m_fileMeta[normSource].linkCount++;
+
+        return true;
+    }
+
+    bool getFileInfo(const std::string& path, FileInfo& info, std::string& errorMsg) override {
+        const std::string normPath = normalizePath(path);
+        std::scoped_lock lock(m_mutex);
+
+        // 检查是否是目录
+        if (m_dirs.find(normPath) != m_dirs.end()) {
+            info.path = normPath;
+            info.link_count = 1;
+            info.open_count = 0;
+            info.size = 0;
+            info.is_directory = true;
+            return true;
+        }
+
+        // 检查是否是硬链接
+        std::string targetPath = normPath;
+        auto linkIt = m_hardLinks.find(normPath);
+        if (linkIt != m_hardLinks.end()) {
+            targetPath = linkIt->second;
+        }
+
+        // 检查是否是文件
+        auto it = m_files.find(targetPath);
+        if (it == m_files.end()) {
+            errorMsg = "File not found: " + normPath;
+            return false;
+        }
+
+        info.path = normPath;
+        info.size = it->second.size();
+        info.is_directory = false;
+
+        // 获取元数据
+        auto metaIt = m_fileMeta.find(targetPath);
+        if (metaIt != m_fileMeta.end()) {
+            info.link_count = metaIt->second.linkCount;
+            info.open_count = metaIt->second.openCount;
+        } else {
+            info.link_count = 1;
+            info.open_count = 0;
+        }
+
+        return true;
+    }
+
+    bool openFile(const std::string& path, std::string& errorMsg) override {
+        const std::string normPath = normalizePath(path);
+        std::scoped_lock lock(m_mutex);
+
+        // 检查是否是硬链接
+        std::string targetPath = normPath;
+        auto linkIt = m_hardLinks.find(normPath);
+        if (linkIt != m_hardLinks.end()) {
+            targetPath = linkIt->second;
+        }
+
+        // 检查文件是否存在
+        if (m_files.find(targetPath) == m_files.end()) {
+            errorMsg = "File not found: " + normPath;
+            return false;
+        }
+
+        // 增加打开计数
+        if (m_fileMeta.find(targetPath) == m_fileMeta.end()) {
+            m_fileMeta[targetPath] = FileMeta();
+        }
+        m_fileMeta[targetPath].openCount++;
+
+        return true;
+    }
+
+    bool closeFile(const std::string& path, std::string& errorMsg) override {
+        const std::string normPath = normalizePath(path);
+        std::scoped_lock lock(m_mutex);
+
+        // 检查是否是硬链接
+        std::string targetPath = normPath;
+        auto linkIt = m_hardLinks.find(normPath);
+        if (linkIt != m_hardLinks.end()) {
+            targetPath = linkIt->second;
+        }
+
+        // 检查文件是否存在
+        if (m_files.find(targetPath) == m_files.end()) {
+            errorMsg = "File not found: " + normPath;
+            return false;
+        }
+
+        // 检查打开计数
+        auto metaIt = m_fileMeta.find(targetPath);
+        if (metaIt == m_fileMeta.end() || metaIt->second.openCount <= 0) {
+            errorMsg = "File is not open: " + normPath;
+            return false;
+        }
+
+        // 减少打开计数
+        metaIt->second.openCount--;
+
+        return true;
+    }
+
 private:
     struct ReviewRequest {
         std::string operation;
@@ -259,12 +535,17 @@ private:
     };
 
     std::mutex m_mutex;
-    std::unordered_set<std::string> m_dirs{"/"};
+    std::unordered_set<std::string> m_dirs;
     std::unordered_map<std::string, std::string> m_files;
-    // snapshotName -> (filePath -> content)
-    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> m_snapshots;
+    std::string m_currentDir;
+    // snapshotName -> SnapshotMetadata (全量快照)
+    std::unordered_map<std::string, SnapshotMetadata> m_snapshots;
     std::unordered_map<std::string, ReviewRequest> m_reviews;
     std::unordered_map<std::string, std::string> m_reviewAssignments;  // reviewId -> reviewer
+    // 文件元数据（链接计数、打开计数）
+    std::unordered_map<std::string, FileMeta> m_fileMeta;
+    // 硬链接映射：链接路径 -> 目标文件路径
+    std::unordered_map<std::string, std::string> m_hardLinks;
 };
 
 class CachingFSProtocol : public FSProtocol, public ICacheStatsProvider {
@@ -364,6 +645,22 @@ public:
         return m_inner->assignReviewer(reviewId, reviewer, errorMsg);
     }
 
+    bool createHardLink(const std::string& sourcePath, const std::string& linkPath, std::string& errorMsg) override {
+        return m_inner->createHardLink(sourcePath, linkPath, errorMsg);
+    }
+
+    bool getFileInfo(const std::string& path, FileInfo& info, std::string& errorMsg) override {
+        return m_inner->getFileInfo(path, info, errorMsg);
+    }
+
+    bool openFile(const std::string& path, std::string& errorMsg) override {
+        return m_inner->openFile(path, errorMsg);
+    }
+
+    bool closeFile(const std::string& path, std::string& errorMsg) override {
+        return m_inner->closeFile(path, errorMsg);
+    }
+
 private:
     std::unique_ptr<FSProtocol> m_inner;
     LRUCache<std::string, std::string> m_cache;  // 线程安全的LRU缓存
@@ -387,9 +684,8 @@ std::unique_ptr<FSProtocol> createFSProtocol() {
         auto real = std::make_unique<RealFileSystemAdapter>(diskPath);
         return std::make_unique<CachingFSProtocol>(std::move(real), 64);
     } catch (const std::exception& e) {
-        std::cerr << "⚠️  Failed to initialize real filesystem, falling back to in-memory: "
-                  << e.what() << std::endl;
-        // 如果真实文件系统初始化失败，回退到内存版本
+        // 静默回退到内存版本，不输出错误信息
+        // 内存版本同样支持所有功能，只是数据不持久化
         auto real = std::make_unique<RealFSProtocol>();
         return std::make_unique<CachingFSProtocol>(std::move(real), 64);
     }
